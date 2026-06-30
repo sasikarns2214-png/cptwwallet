@@ -1,0 +1,1116 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wallet - Little Bibi</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          indigo: {
+            50: '#fdf2f1', 100: '#fbe5e3', 200: '#f8d5cf', 300: '#f3c2cf',
+            400: '#dfcaf3', 500: '#c9a8ec', 600: '#ffc182', 700: '#f7a94e',
+            800: '#a8729a', 900: '#7a4f70'
+          }
+        }
+      }
+    }
+  }
+</script>
+<style>
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: translateY(0);} }
+.animate-fadeIn { animation: fadeIn .25s ease-out; }
+body { font-family: 'Segoe UI', 'Noto Sans Thai', sans-serif; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "lucide-react": "https://esm.sh/lucide-react@0.383.0?external=react"
+  }
+}
+</script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-type="module" data-presets="react">
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import ReactDOM from 'react-dom/client';
+import {
+  TrendingUp,
+  TrendingDown,
+  Wallet,
+  Plus,
+  Trash2,
+  CloudLightning,
+  Settings,
+  Calendar,
+  BookOpen,
+  Copy,
+  Check,
+  FileSpreadsheet,
+  Search,
+  RefreshCw,
+  AlertCircle,
+  User,
+  Users,
+  FolderPlus,
+  Palette,
+  Coins,
+  LayoutDashboard,
+  PiggyBank,
+  PieChart,
+  Activity,
+  ArrowRight
+} from 'lucide-react';
+
+
+// ตัวสร้างไอดีสำรอง ปลอดภัยกว่า crypto.randomUUID ใน iframe sandbox
+const generateId = () => {
+  return 'tx_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now().toString(36);
+};
+
+// ตัวช่วยเข้าถึง LocalStorage อย่างปลอดภัย ป้องกันกรณี Sandbox บล็อก และดักจับ JSON Error
+const safeStorage = {
+  getItem: (key, defaultValue) => {
+    try {
+      const saved = window.localStorage.getItem(key);
+      if (!saved) return defaultValue;
+      return JSON.parse(saved);
+    } catch (e) {
+      console.warn("Storage access restricted or JSON parse error:", e);
+      return defaultValue; // ส่งคืนค่าเริ่มต้นแทนหากข้อมูลในเบราว์เซอร์เก่าพัง
+    }
+  },
+  setItem: (key, value) => {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+      console.warn("Storage write is restricted in this environment:", e);
+    }
+  }
+};
+
+// กำหนดบัญชีผู้รับผิดชอบค่าใช้จ่าย
+const ACCOUNTS = {
+  self: { id: 'self', name: 'Chompu', color: '#3B82F6', badgeClass: 'bg-blue-50 text-blue-700 border-blue-200' },
+  partner: { id: 'partner', name: 'Tawan', color: '#EC4899', badgeClass: 'bg-pink-50 text-pink-700 border-pink-200' },
+  joint: { id: 'joint', name: 'Common purse', color: '#F59E0B', badgeClass: 'bg-amber-50 text-amber-700 border-amber-200' }
+};
+
+const PRESET_EMOJIS = ['🍔', '☕', '🚗', '🛍️', '🧾', '🎮', '💊', '📦', '💰', '📈', '💻', '🎁', '✨', '🏠', '🎬', '✈️', '🐾', '💄', '📚', '🏋️'];
+const PRESET_COLORS = ['#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#8B5CF6', '#EC4899', '#6B7280', '#06B6D4', '#84CC16', '#F43F5E'];
+
+const DEFAULT_CATEGORIES = {
+  expense: [
+    { id: 'food', name: 'อาหารและเครื่องดื่ม', emoji: '🍔', color: '#EF4444' },
+    { id: 'travel', name: 'การเดินทาง / น้ำมัน', emoji: '🚗', color: '#F59E0B' },
+    { id: 'shopping', name: 'ช้อปปิ้ง', emoji: '🛍️', color: '#EC4899' },
+    { id: 'bills', name: 'บิล / ค่าเช่า / สาธารณูปโภค', emoji: '🧾', color: '#3B82F6' },
+    { id: 'entertainment', name: 'ความบันเทิง', emoji: '🎮', color: '#8B5CF6' },
+    { id: 'health', name: 'สุขภาพ / ยา', emoji: '💊', color: '#10B981' },
+    { id: 'other_exp', name: 'อื่นๆ', emoji: '📦', color: '#6B7280' }
+  ],
+  income: [
+    { id: 'salary', name: 'เงินเดือน / ค่าจ้าง', emoji: '💰', color: '#10B981' },
+    { id: 'invest', name: 'การลงทุน / ปันผล', emoji: '📈', color: '#059669' },
+    { id: 'freelance', name: 'งานเสริม / ฟรีแลนซ์', emoji: '💻', color: '#2563EB' },
+    { id: 'gift', name: 'ได้รับเสน่หา / ของขวัญ', emoji: '🎁', color: '#D97706' },
+    { id: 'other_inc', name: 'อื่นๆ', emoji: '✨', color: '#4B5563' }
+  ]
+};
+
+const DEFAULT_TRANSACTIONS = [
+  { id: '1', date: new Date().toISOString().split('T')[0], account: 'joint', pocketId: 'bank', type: 'income', category: 'เงินเดือน / ค่าจ้าง', emoji: '💰', amount: 35000, note: 'เงินเดือนกองกลาง' },
+  { id: '2', date: new Date().toISOString().split('T')[0], account: 'self', pocketId: 'cash', type: 'expense', category: 'อาหารและเครื่องดื่ม', emoji: '🍔', amount: 180, note: 'ข้าวกะเพราส่วนของเรา' },
+  { id: '3', date: new Date().toISOString().split('T')[0], account: 'joint', pocketId: 'bank', type: 'expense', category: 'บิล / ค่าเช่า / สาธารณูปโภค', emoji: '🧾', amount: 2500, note: 'ค่าน้ำค่าไฟห้องกองกลาง' },
+  { id: '4', date: new Date().toISOString().split('T')[0], account: 'partner', pocketId: 'saving', type: 'expense', category: 'ช้อปปิ้ง', emoji: '🛍️', amount: 1200, note: 'แฟนช้อปปิ้งเสื้อผ้าใหม่' }
+];
+
+const DEFAULT_POCKETS = [
+  { id: 'cash', name: 'ใช้จ่ายระหว่างเดือน', emoji: '💵', account: 'self', initialBalance: 2000, targetAmount: 0 },
+  { id: 'bank', name: 'ซื้อหูฟังอันใหม่', emoji: '🎧', account: 'joint', initialBalance: 15000, targetAmount: 15000 },
+  { id: 'saving', name: 'เก็บหอมรอมริบ', emoji: '🐷', account: 'partner', initialBalance: 30000, targetAmount: 0 }
+];
+
+function App() {
+  // ระบบแท็บ ('daily' = บันทึกรายวัน, 'dashboard' = แดชบอร์ดสรุปผล)
+  const [currentTab, setCurrentTab] = useState('daily');
+
+  // ข้อมูลหลัก
+  const [transactions, setTransactions] = useState(() => safeStorage.getItem('v5_transactions', DEFAULT_TRANSACTIONS));
+  const [categories, setCategories] = useState(() => safeStorage.getItem('v5_categories', DEFAULT_CATEGORIES));
+  const [pockets, setPockets] = useState(() => safeStorage.getItem('v5_pockets', DEFAULT_POCKETS));
+
+  // สเตตฟอร์มเพิ่มข้อมูล
+  const [txType, setTxType] = useState('expense');
+  const [account, setAccount] = useState('self');
+  const [pocketId, setPocketId] = useState(pockets[0]?.id || 'cash');
+  const [amount, setAmount] = useState('');
+  const [category, setCategory] = useState('');
+  const [note, setNote] = useState('');
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // สเตตฟอร์มจัดการ (Pocket & Categories)
+  const [showAddPocketForm, setShowAddPocketForm] = useState(false);
+  const [newPocketName, setNewPocketName] = useState('');
+  const [newPocketBalance, setNewPocketBalance] = useState('');
+  const [newPocketEmoji, setNewPocketEmoji] = useState(PRESET_EMOJIS[8]);
+  const [newPocketTarget, setNewPocketTarget] = useState('');
+  const [newPocketAccount, setNewPocketAccount] = useState('self');
+  
+  const [showAddCategoryForm, setShowAddCategoryForm] = useState(false);
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatEmoji, setNewCatEmoji] = useState(PRESET_EMOJIS[0]);
+  const [newCatColor, setNewCatColor] = useState(PRESET_COLORS[0]);
+  const [editingCatId, setEditingCatId] = useState(null);
+  const [editCatName, setEditCatName] = useState('');
+  const [editCatEmoji, setEditCatEmoji] = useState(PRESET_EMOJIS[0]);
+
+  // สเตตการค้นหา & คัดกรอง
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState('all'); 
+  const [filterAccount, setFilterAccount] = useState('all'); 
+  const [filterPocket, setFilterPocket] = useState('all');
+
+  // สเตต Cloud Sync Google Sheets
+  const DEFAULT_SHEET_URL = 'https://script.google.com/macros/s/AKfycbyYe_EJTfgzqz9UxrCpGrXmGg_Et_DDOYe7zS69sBGxaEZXqlhREGqxGKK0ZpNofXOFxw/exec';
+  const [sheetUrl, setSheetUrl] = useState(() => {
+    try { return window.localStorage.getItem('v5_sheet_url') || DEFAULT_SHEET_URL; } catch(e) { return DEFAULT_SHEET_URL; }
+  });
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('not_connected'); 
+  const [lastSyncTime, setLastSyncTime] = useState(null);
+  const [showSetupModal, setShowSetupModal] = useState(false);
+  const [copiedScript, setCopiedScript] = useState(false);
+  
+  // แจ้งเตือน UI Toast
+  const [uiToast, setUiToast] = useState(null);
+
+  // Auto-Save Effect
+  useEffect(() => {
+    safeStorage.setItem('v5_transactions', transactions);
+    safeStorage.setItem('v5_categories', categories);
+    safeStorage.setItem('v5_pockets', pockets);
+    try { window.localStorage.setItem('v5_sheet_url', sheetUrl); } catch(e) {}
+  }, [transactions, categories, pockets, sheetUrl]);
+
+  // ดึงข้อมูลจาก Google Sheets อัตโนมัติตอนเปิดแอป (ถ้าตั้งค่า URL ไว้แล้ว)
+  const hasLoadedFromSheet = useRef(false);
+  useEffect(() => {
+    if (sheetUrl && !hasLoadedFromSheet.current) {
+      hasLoadedFromSheet.current = true;
+      handleLoadFromGoogleSheet(true);
+    }
+  }, [sheetUrl]);
+
+  // อัพเดตข้อมูลแบบเรียลไทม์: โพลดึงข้อมูลใหม่เป็นระยะ + ดึงทันทีเมื่อกลับมาที่แท็บ/หน้าต่าง
+  const isSyncingRef = useRef(false);
+  useEffect(() => { isSyncingRef.current = isSyncing; }, [isSyncing]);
+  // true ระหว่างที่ยังมีการแก้ไขค้างรอบันทึกขึ้น Sheet (กันโพลทับข้อมูลที่ยังไม่ได้เซฟ)
+  const hasPendingLocalChange = useRef(false);
+
+  useEffect(() => {
+    if (!sheetUrl) return;
+    const canPullNow = () => document.visibilityState === 'visible' && !isSyncingRef.current && !hasPendingLocalChange.current;
+
+    // โพลทุก 10 วินาทีขณะแท็บนี้เปิดอยู่ (เงียบๆ ไม่รบกวนผู้ใช้)
+    const pollInterval = setInterval(() => {
+      if (canPullNow()) handleLoadFromGoogleSheet(true);
+    }, 10000);
+
+    // ดึงข้อมูลใหม่ทันทีเมื่อสลับกลับมาที่แท็บนี้ (เช่น สลับแอปแล้วกลับมา)
+    const handleVisibilityChange = () => { if (canPullNow()) handleLoadFromGoogleSheet(true); };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // ดึงข้อมูลใหม่ทันทีเมื่อกลับมา focus หน้าต่าง (กรณีเปิดหลายอุปกรณ์/หน้าต่าง)
+    const handleFocus = () => { if (canPullNow()) handleLoadFromGoogleSheet(true); };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(pollInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [sheetUrl]);
+
+  // บันทึกขึ้น Google Sheets อัตโนมัติทุกครั้งที่มีการเพิ่ม/แก้ไข/ลบข้อมูล (debounce)
+  const autoSyncTimer = useRef(null);
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    if (!sheetUrl) return;
+    hasPendingLocalChange.current = true;
+    if (autoSyncTimer.current) clearTimeout(autoSyncTimer.current);
+    autoSyncTimer.current = setTimeout(() => {
+      handleBackupToGoogleSheet(true).finally(() => { hasPendingLocalChange.current = false; });
+    }, 1200);
+    return () => { if (autoSyncTimer.current) clearTimeout(autoSyncTimer.current); };
+  }, [transactions, categories, pockets]);
+
+  // เปลี่ยนหมวดหมู่อัตโนมัติเมื่อสลับประเภท (รายรับ/รายจ่าย)
+  useEffect(() => {
+    if (categories[txType] && categories[txType].length > 0) {
+      setCategory(categories[txType][0].name);
+    }
+  }, [txType, categories]);
+
+  // เลือก Pocket ของเจ้าของบัญชีนั้นๆ ให้อัตโนมัติเมื่อสลับผู้ใช้เงิน
+  useEffect(() => {
+    const ownedPockets = pockets.filter(p => p.account === account);
+    if (ownedPockets.length > 0 && !ownedPockets.some(p => p.id === pocketId)) {
+      setPocketId(ownedPockets[0].id);
+    } else if (ownedPockets.length === 0) {
+      setPocketId('');
+    }
+  }, [account, pockets]);
+
+  // Toast Function
+  const showToast = (message, type = 'info') => {
+    setUiToast({ message, type });
+    setTimeout(() => setUiToast(null), 3500);
+  };
+
+  // คำนวณยอดเงินของแต่ละกระเป๋า (Pocket Balances)
+  const pocketBalances = useMemo(() => {
+    return pockets.map(pocket => {
+      const txsForPocket = transactions.filter(tx => tx.pocketId === pocket.id);
+      const totalIncome = txsForPocket.filter(tx => tx.type === 'income').reduce((sum, tx) => sum + Number(tx.amount), 0);
+      const totalExpense = txsForPocket.filter(tx => tx.type === 'expense').reduce((sum, tx) => sum + Number(tx.amount), 0);
+      return {
+        ...pocket,
+        currentBalance: pocket.initialBalance + totalIncome - totalExpense
+      };
+    });
+  }, [pockets, transactions]);
+
+  // คำนวณยอดรวมรายรับรายจ่าย และยอดสุทธิ (Total Assets)
+  const summary = useMemo(() => {
+    let income = 0;
+    let expense = 0;
+    let selfExpense = 0;
+    let partnerExpense = 0;
+    let jointExpense = 0;
+
+    transactions.forEach(tx => {
+      const amt = Number(tx.amount);
+      if (tx.type === 'income') {
+        income += amt;
+      } else {
+        expense += amt;
+        if (tx.account === 'self') selfExpense += amt;
+        if (tx.account === 'partner') partnerExpense += amt;
+        if (tx.account === 'joint') jointExpense += amt;
+      }
+    });
+
+    const totalAssets = pocketBalances.reduce((sum, p) => sum + p.currentBalance, 0);
+
+    return { income, expense, balance: totalAssets, selfExpense, partnerExpense, jointExpense };
+  }, [transactions, pocketBalances]);
+
+  // สถิติหมวดหมู่สำหรับกราฟวงกลม (แยกตามผู้ใช้เงิน: เรา / แฟน / กองกลาง)
+  const categoryStatsByAccount = useMemo(() => {
+    const list = [...categories.expense, ...categories.income];
+
+    const buildStats = (accountFilter) => {
+      const stats = {};
+      let total = 0;
+      transactions.forEach(tx => {
+        if (tx.type === 'expense' && tx.account === accountFilter && (filterPocket === 'all' || tx.pocketId === filterPocket)) {
+          stats[tx.category] = (stats[tx.category] || 0) + Number(tx.amount);
+          total += Number(tx.amount);
+        }
+      });
+      return Object.keys(stats).map(catName => {
+        const matchCat = list.find(c => c.name === catName) || { emoji: '📦', color: '#6B7280' };
+        return {
+          name: catName,
+          amount: stats[catName],
+          percentage: total > 0 ? Math.round((stats[catName] / total) * 100) : 0,
+          color: matchCat.color,
+          emoji: matchCat.emoji
+        };
+      }).sort((a, b) => b.amount - a.amount);
+    };
+
+    return {
+      self: buildStats('self'),
+      partner: buildStats('partner'),
+      joint: buildStats('joint')
+    };
+  }, [transactions, categories, filterPocket]);
+
+  // สัดส่วนทรัพย์สินในแต่ละกระเป๋า แยกตามเจ้าของ Pocket (เรา / แฟน / กองกลาง)
+  const assetStatsByAccount = useMemo(() => {
+    const buildPocketStats = (accountFilter) => {
+      const owned = pocketBalances.filter(p => p.account === accountFilter);
+      const totalAbs = owned.reduce((sum, p) => sum + Math.abs(p.currentBalance), 0);
+      return owned
+        .map(p => ({
+          id: p.id,
+          name: p.name,
+          emoji: p.emoji || '👛',
+          net: p.currentBalance,
+          percentage: totalAbs > 0 ? Math.round((Math.abs(p.currentBalance) / totalAbs) * 100) : 0
+        }))
+        .sort((a, b) => b.net - a.net);
+    };
+
+    return {
+      self: buildPocketStats('self'),
+      partner: buildPocketStats('partner'),
+      joint: buildPocketStats('joint')
+    };
+  }, [pocketBalances]);
+
+  const handleCopyScript = () => {
+    const scriptCode = `function doPost(e) {
+  try {
+    var data = JSON.parse(e.postData.contents);
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    var sheet = ss.getSheetByName('Transactions') || ss.insertSheet('Transactions');
+    sheet.clear();
+    sheet.appendRow(["ID", "วันที่", "เจ้าของเงิน / บัญชี", "กระเป๋าเงิน (Pocket)", "ประเภทเงิน", "หมวดหมู่", "จำนวนเงิน (บาท)", "รายละเอียดเพิ่มเติม"]);
+    data.transactions.forEach(function(tx) {
+      var accountText = tx.account === 'self' ? 'Chompu' : (tx.account === 'partner' ? 'Tawan' : 'Common purse');
+      sheet.appendRow([tx.id, tx.date, accountText, tx.pocketName || 'ทั่วไป', tx.type === 'income' ? 'รายรับ' : 'รายจ่าย', tx.category, tx.amount, tx.note || '']);
+    });
+    var headerRange = sheet.getRange("A1:H1");
+    headerRange.setFontWeight("bold");
+    headerRange.setBackgroundColor("#059669");
+    headerRange.setFontColor("#FFFFFF");
+
+    var dataSheet = ss.getSheetByName('AppData') || ss.insertSheet('AppData');
+    dataSheet.clear();
+    dataSheet.getRange(1, 1).setValue(JSON.stringify({
+      transactions: data.transactions || [],
+      categories: data.categories || null,
+      pockets: data.pockets || null
+    }));
+    dataSheet.hideSheet();
+
+    return ContentService.createTextOutput(JSON.stringify({ status: "success" })).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.toString() })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doGet(e) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var dataSheet = ss.getSheetByName('AppData');
+    if (!dataSheet) {
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", data: null })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var raw = dataSheet.getRange(1, 1).getValue();
+    var parsed = raw ? JSON.parse(raw) : null;
+    return ContentService.createTextOutput(JSON.stringify({ status: "success", data: parsed })).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.toString() })).setMimeType(ContentService.MimeType.JSON);
+  }
+}`;
+    const tempTextArea = document.createElement('textarea');
+    tempTextArea.value = scriptCode;
+    document.body.appendChild(tempTextArea);
+    tempTextArea.select();
+    try {
+      document.execCommand('copy');
+      setCopiedScript(true);
+      showToast('คัดลอก Apps Script เรียบร้อย!', 'success');
+      setTimeout(() => setCopiedScript(false), 2500);
+    } catch (err) {
+      console.error('Copy script failed', err);
+    }
+    document.body.removeChild(tempTextArea);
+  };
+
+  const handleBackupToGoogleSheet = async (silent = false) => {
+    if (!sheetUrl) {
+      if (!silent) setShowSetupModal(true);
+      return;
+    }
+    if (!silent) { setIsSyncing(true); setSyncStatus('syncing'); }
+
+    const mappedTransactions = transactions.map(tx => {
+      const pocketObj = pockets.find(p => p.id === tx.pocketId);
+      return { ...tx, pocketName: pocketObj ? pocketObj.name : 'ทั่วไป' };
+    });
+
+    try {
+      const response = await fetch(sheetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ transactions: mappedTransactions, categories, pockets })
+      });
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const responseData = await response.json();
+      if (responseData.status === 'success') {
+        setSyncStatus('success');
+        setLastSyncTime(new Date().toLocaleTimeString('th-TH'));
+        if (!silent) showToast('สำรองข้อมูลขึ้นคลาวด์สำเร็จ!', 'success');
+      } else {
+        throw new Error(responseData.message || 'Error from Google Sheets');
+      }
+    } catch (error) {
+      setSyncStatus('error');
+      if (!silent) showToast('การสำรองข้อมูลล้มเหลว กรุณาเช็ก URL', 'error');
+    } finally {
+      if (!silent) setIsSyncing(false);
+    }
+  };
+
+  const handleLoadFromGoogleSheet = async (silent = false) => {
+    if (!sheetUrl) return;
+    if (!silent) { setIsSyncing(true); setSyncStatus('syncing'); }
+    try {
+      const response = await fetch(sheetUrl, { method: 'GET' });
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const responseData = await response.json();
+      if (responseData.status === 'success' && responseData.data) {
+        if (Array.isArray(responseData.data.transactions)) setTransactions(responseData.data.transactions);
+        if (responseData.data.categories) setCategories(responseData.data.categories);
+        if (Array.isArray(responseData.data.pockets) && responseData.data.pockets.length > 0) setPockets(responseData.data.pockets);
+        setSyncStatus('success');
+        setLastSyncTime(new Date().toLocaleTimeString('th-TH'));
+        if (!silent) showToast('ดึงข้อมูลจาก Google Sheets สำเร็จ!', 'success');
+      } else if (!silent) {
+        showToast('ยังไม่มีข้อมูลใน Google Sheets', 'info');
+      }
+    } catch (error) {
+      setSyncStatus('error');
+      if (!silent) showToast('ดึงข้อมูลล้มเหลว กรุณาเช็ก URL', 'error');
+    } finally {
+      if (!silent) setIsSyncing(false);
+    }
+  };
+
+  const handleAddPocket = (e) => {
+    e.preventDefault();
+    if (!newPocketName.trim()) return;
+    const newPocket = { id: generateId(), name: newPocketName.trim(), emoji: newPocketEmoji, account: newPocketAccount, initialBalance: Number(newPocketBalance) || 0, targetAmount: Number(newPocketTarget) || 0 };
+    setPockets(prev => [...prev, newPocket]);
+    if (newPocket.account === account) setPocketId(newPocket.id);
+    setNewPocketName('');
+    setNewPocketBalance('');
+    setNewPocketTarget('');
+    setNewPocketEmoji(PRESET_EMOJIS[8]);
+    setShowAddPocketForm(false);
+    showToast(`เพิ่ม Pocket "${newPocket.name}" สำเร็จ!`, 'success');
+  };
+
+  const handleDeletePocket = (pId, e) => {
+    e.stopPropagation();
+    const remaining = pockets.filter(p => p.id !== pId);
+    setPockets(remaining);
+    if (pocketId === pId) setPocketId(remaining[0]?.id || '');
+    showToast('ลบ Pocket สำเร็จ', 'info');
+  };
+
+  const handleAddCustomCategory = (e) => {
+    e.preventDefault();
+    if (!newCatName.trim()) return;
+    if (categories[txType].some(cat => cat.name.toLowerCase() === newCatName.trim().toLowerCase())) {
+      showToast('หมวดหมู่นี้มีอยู่แล้ว', 'error');
+      return;
+    }
+    const newCat = { id: generateId(), name: newCatName.trim(), emoji: newCatEmoji, color: newCatColor };
+    setCategories(prev => ({ ...prev, [txType]: [...prev[txType], newCat] }));
+    setCategory(newCat.name);
+    setNewCatName('');
+    setShowAddCategoryForm(false);
+    showToast(`เพิ่มหมวดหมู่สำเร็จ!`, 'success');
+  };
+
+  const handleDeleteCategory = (catId, type) => {
+    setCategories(prev => ({ ...prev, [type]: prev[type].filter(cat => cat.id !== catId) }));
+    showToast('ลบหมวดหมู่สำเร็จ', 'info');
+  };
+
+  const startEditCategory = (cat) => {
+    setEditingCatId(cat.id);
+    setEditCatName(cat.name);
+    setEditCatEmoji(cat.emoji);
+    setShowAddCategoryForm(false);
+  };
+
+  const cancelEditCategory = () => {
+    setEditingCatId(null);
+    setEditCatName('');
+  };
+
+  const handleSaveEditCategory = (catId, type) => {
+    if (!editCatName.trim()) return;
+    setCategories(prev => ({
+      ...prev,
+      [type]: prev[type].map(cat => cat.id === catId ? { ...cat, name: editCatName.trim(), emoji: editCatEmoji } : cat)
+    }));
+    if (category === categories[type].find(c => c.id === catId)?.name) {
+      setCategory(editCatName.trim());
+    }
+    setEditingCatId(null);
+    showToast('แก้ไขหมวดหมู่สำเร็จ', 'success');
+  };
+
+  const handleAddTransaction = (e) => {
+    e.preventDefault();
+    if (!amount || Number(amount) <= 0) return;
+    const allCats = [...categories.expense, ...categories.income];
+    const matchedCategory = allCats.find(c => c.name === category);
+    const newTx = {
+      id: generateId(), date, account, pocketId, type: txType, category,
+      emoji: matchedCategory ? matchedCategory.emoji : '📦', amount: Number(amount), note: note.trim()
+    };
+    setTransactions(prev => [newTx, ...prev]);
+    setAmount('');
+    setNote('');
+    showToast('บันทึกรายการสำเร็จ!', 'success');
+  };
+
+  const handleDeleteTransaction = (id) => {
+    setTransactions(prev => prev.filter(tx => tx.id !== id));
+    showToast('ลบรายการสำเร็จ', 'info');
+  };
+
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter(tx => {
+      const matchesSearch = tx.note.toLowerCase().includes(searchTerm.toLowerCase()) || tx.category.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesType = filterType === 'all' || tx.type === filterType;
+      const matchesAccount = filterAccount === 'all' || tx.account === filterAccount;
+      const matchesPocket = filterPocket === 'all' || tx.pocketId === filterPocket;
+      return matchesSearch && matchesType && matchesAccount && matchesPocket;
+    });
+  }, [transactions, searchTerm, filterType, filterAccount, filterPocket]);
+
+  const renderDashboardTab = () => {
+    const savingsRate = summary.income > 0 ? ((summary.income - summary.expense) / summary.income) * 100 : 0;
+    const isHealthy = savingsRate >= 20;
+
+    return (
+      <div className="space-y-6 animate-fadeIn">
+        {/* กล่องสรุปสถานะการเงิน (Health) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="col-span-1 md:col-span-2 bg-gradient-to-br from-indigo-900 to-slate-800 text-white rounded-2xl p-6 shadow-md relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-4 opacity-10">
+              <Activity className="w-32 h-32" />
+            </div>
+            <div className="relative z-10">
+              <h3 className="text-sm font-semibold text-indigo-200 uppercase tracking-wider mb-1 flex items-center gap-2">
+                <PiggyBank className="w-4 h-4" /> อัตราการออมสุทธิ (Savings Rate)
+              </h3>
+              <div className="flex items-end gap-3 mt-2">
+                <span className="text-5xl font-extrabold tracking-tight">{savingsRate.toFixed(1)}%</span>
+                <span className="text-sm text-indigo-200 mb-1.5">ของรายได้</span>
+              </div>
+              <div className="mt-4 flex items-center gap-2">
+                <span className={`px-2.5 py-1 text-xs font-bold rounded-lg ${isHealthy ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'}`}>
+                  {isHealthy ? 'ยอดเยี่ยม! สุขภาพการเงินแข็งแรง' : 'ควรระวัง! ควรเพิ่มการออมให้ถึง 20%'}
+                </span>
+              </div>
+              
+              {/* แถบ Progress Bar ของรายรับเทียบรายจ่าย */}
+              <div className="mt-6 pt-4 border-t border-white/10 space-y-2">
+                <div className="flex justify-between text-xs font-medium text-indigo-200">
+                  <span>กระแสเงิน: ใช้ไปแล้ว {summary.expense.toLocaleString()} บ.</span>
+                  <span>รับรวม {summary.income.toLocaleString()} บ.</span>
+                </div>
+                <div className="w-full bg-slate-900/50 h-3 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full transition-all duration-1000 ${savingsRate > 50 ? 'bg-emerald-400' : savingsRate > 0 ? 'bg-amber-400' : 'bg-rose-500'}`}
+                    style={{ width: `${Math.min((summary.expense / (summary.income || 1)) * 100, 100)}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="col-span-1 bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex flex-col justify-center items-center text-center">
+            <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mb-4 shadow-inner">
+              <PieChart className="w-8 h-8" />
+            </div>
+            <h3 className="text-sm font-bold text-slate-500 mb-1">ความมั่งคั่งสุทธิของคุณ</h3>
+            <p className="text-3xl font-extrabold text-slate-800 tracking-tight">
+              ฿{summary.balance.toLocaleString('th-TH', { maximumFractionDigits: 0 })}
+            </p>
+            <p className="text-xs text-slate-400 mt-2">รวมจากทุกกระเป๋า {pockets.length} ใบ</p>
+          </div>
+        </div>
+
+        {/* แถวที่ 2: สัดส่วนกระเป๋าเงิน และ ผู้ใช้จ่าย */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          
+          {/* วิเคราะห์การเก็บเงินตามกระเป๋า แยกตามผู้ใช้เงิน */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+            <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <Coins className="w-4 h-4 text-emerald-600" /> แหล่งเก็บทรัพย์สิน แยกตามผู้ใช้
+            </h3>
+            <div className="grid grid-cols-1 gap-5">
+              {Object.keys(ACCOUNTS).map(accKey => {
+                const stats = assetStatsByAccount[accKey];
+                const accNet = stats.reduce((sum, p) => sum + p.net, 0);
+                return (
+                  <div key={accKey} className="space-y-2">
+                    <div className="flex items-center justify-between pb-1.5 border-b border-slate-100">
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${ACCOUNTS[accKey].badgeClass}`}>{ACCOUNTS[accKey].name}</span>
+                      <span className={`text-xs font-extrabold ${accNet >= 0 ? 'text-slate-700' : 'text-rose-600'}`}>฿{accNet.toLocaleString()}</span>
+                    </div>
+                    {stats.length === 0 ? (
+                      <p className="text-[11px] text-slate-400 text-center py-2">ยังไม่มีการเคลื่อนไหว</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {stats.map(p => (
+                          <div key={p.id} className="space-y-1">
+                            <div className="flex justify-between text-[11px] font-bold text-slate-600">
+                              <span className="flex items-center gap-1 truncate">{p.emoji} {p.name}</span>
+                              <span className={`shrink-0 ml-1 ${p.net >= 0 ? '' : 'text-rose-600'}`}>฿{p.net.toLocaleString()} ({p.percentage}%)</span>
+                            </div>
+                            <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                              <div className={`h-full rounded-full ${p.net >= 0 ? 'bg-emerald-500' : 'bg-rose-400'}`} style={{ width: `${p.percentage}%` }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* วิเคราะห์รายจ่ายของแต่ละคน */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+            <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <Users className="w-4 h-4 text-indigo-600" /> สัดส่วนผู้ใช้เงิน (Spender Profile)
+            </h3>
+            <div className="space-y-4">
+              {[
+                { name: 'ส่วนของ Chompu', amount: summary.selfExpense, color: 'bg-blue-500' },
+                { name: 'ส่วนของ Tawan', amount: summary.partnerExpense, color: 'bg-pink-500' },
+                { name: 'Common purse', amount: summary.jointExpense, color: 'bg-amber-500' }
+              ].sort((a,b) => b.amount - a.amount).map((spender, idx) => {
+                const percent = summary.expense > 0 ? (spender.amount / summary.expense) * 100 : 0;
+                return (
+                  <div key={idx} className="space-y-1.5">
+                    <div className="flex justify-between text-xs font-bold text-slate-600">
+                      <span>{spender.name}</span>
+                      <span>฿{spender.amount.toLocaleString()} ({percent.toFixed(1)}%)</span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${spender.color}`} style={{ width: `${percent}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* แถวที่ 3: หมวดหมู่ที่ใช้เงินไป แยกตามผู้ใช้เงิน */}
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+          <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
+            <PieChart className="w-4 h-4 text-rose-600" /> หมวดหมู่ที่ใช้เงินไป แยกตามผู้ใช้
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {Object.keys(ACCOUNTS).map(accKey => {
+              const stats = categoryStatsByAccount[accKey];
+              const accTotal = stats.reduce((sum, c) => sum + c.amount, 0);
+              return (
+                <div key={accKey} className="space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${ACCOUNTS[accKey].badgeClass}`}>{ACCOUNTS[accKey].name}</span>
+                    <span className="text-xs font-extrabold text-slate-700">฿{accTotal.toLocaleString()}</span>
+                  </div>
+                  {stats.length === 0 ? (
+                    <p className="text-[11px] text-slate-400 text-center py-4">ยังไม่มีรายจ่าย</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {stats.map((cat, idx) => (
+                        <div key={idx} className="space-y-1">
+                          <div className="flex justify-between items-center text-[11px] font-bold text-slate-600">
+                            <span className="flex items-center gap-1 truncate">
+                              <span className="text-sm">{cat.emoji}</span> {cat.name}
+                            </span>
+                            <span className="shrink-0 ml-1">฿{cat.amount.toLocaleString()} ({cat.percentage}%)</span>
+                          </div>
+                          <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full" style={{ width: `${cat.percentage}%`, backgroundColor: cat.color }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-[#fdf2f1] text-slate-800 font-sans pb-16 antialiased">
+      
+      {/* Toast Notification */}
+      {uiToast && (
+        <div className="fixed top-20 right-4 z-50 animate-bounce">
+          <div className={`px-4 py-3 rounded-xl shadow-xl flex items-center gap-2 border text-sm font-semibold ${
+            uiToast.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'
+          }`}>
+            <span>{uiToast.type === 'success' ? '✅' : '❌'}</span>
+            <span>{uiToast.message}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
+      <header className="bg-gradient-to-r from-[#f8d5cf] via-[#dfcaf3] to-[#ffe59a] text-slate-700 shadow-xl sticky top-0 z-40">
+        <div className="max-w-6xl mx-auto px-4 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-white/60 rounded-xl shadow-inner">
+              <Wallet className="w-7 h-7 text-[#a8729a]" />
+            </div>
+            <div>
+              <h1 className="text-xl font-extrabold tracking-tight text-slate-700">Wallet <span className="text-[#a8729a]">‧⁺◟꒰🦌🎄꒱˚ ༘♡ Little bibi</span></h1>
+              <p className="text-[10px] text-slate-600 flex items-center gap-1">
+                <CloudLightning className="w-3 h-3" /> แยกผู้ใช้ • แยกกระเป๋า • Google Sheets Sync
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowSetupModal(true)} className="p-2 bg-white/50 hover:bg-white/80 rounded-lg text-slate-600 transition" title="ตั้งค่า Sheets">
+              <Settings className="w-4 h-4" />
+            </button>
+            <button onClick={() => handleLoadFromGoogleSheet()} disabled={isSyncing} className="flex items-center gap-1.5 px-3 py-2 bg-white/70 hover:bg-white text-slate-700 rounded-lg text-xs font-bold transition border border-slate-200" title="ดึงข้อมูลจาก Google Sheets">
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>ดึงข้อมูล</span>
+            </button>
+            <button onClick={() => handleBackupToGoogleSheet()} disabled={isSyncing} className="flex items-center gap-1.5 px-3 py-2 bg-[#ffc182] hover:bg-[#f7a94e] text-slate-800 rounded-lg text-xs font-bold transition">
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span>{isSyncing ? 'กำลังส่งข้อมูล...' : 'Sync Data'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* ระบบ Navigation Tabs */}
+        <div className="border-t border-white/40">
+          <div className="max-w-6xl mx-auto px-4 flex gap-6">
+            <button
+              onClick={() => setCurrentTab('daily')}
+              className={`py-3 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${
+                currentTab === 'daily' ? 'border-[#a8729a] text-[#a8729a]' : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              📝 บันทึกรายวัน
+            </button>
+            <button
+              onClick={() => setCurrentTab('dashboard')}
+              className={`py-3 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${
+                currentTab === 'dashboard' ? 'border-[#a8729a] text-[#a8729a]' : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <LayoutDashboard className="w-4 h-4" /> แดชบอร์ดภาพรวม
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-4 py-6">
+        
+        {/* Render เนื้อหาตาม Tab ที่เลือก */}
+        {currentTab === 'dashboard' ? (
+          renderDashboardTab()
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-fadeIn">
+            {/* คอลัมน์ซ้าย: บันทึกรายการใหม่ */}
+            <section className="lg:col-span-5 space-y-6">
+              
+              {/* Pocket Summary */}
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                    <Coins className="w-4 h-4 text-emerald-600" /> Pocket ของฉัน
+                  </h3>
+                  <button onClick={() => setShowAddPocketForm(!showAddPocketForm)} className="text-[11px] font-bold text-indigo-600 flex items-center gap-1 hover:underline">
+                    <Plus className="w-3 h-3" /> เพิ่ม Pocket
+                  </button>
+                </div>
+
+                {showAddPocketForm && (
+                  <form onSubmit={handleAddPocket} className="mb-3 p-3 bg-slate-50 border border-slate-100 rounded-xl space-y-2">
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {Object.keys(ACCOUNTS).map(key => (
+                        <button key={key} type="button" onClick={() => setNewPocketAccount(key)} className={`py-1.5 rounded-lg border text-[11px] font-bold transition ${newPocketAccount === key ? 'bg-indigo-50 border-indigo-400 text-indigo-900 ring-1 ring-indigo-400' : 'bg-white text-slate-500'}`}>
+                          {ACCOUNTS[key].name}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {PRESET_EMOJIS.map(em => (
+                        <button key={em} type="button" onClick={() => setNewPocketEmoji(em)} className={`w-7 h-7 flex items-center justify-center rounded-lg border text-sm ${newPocketEmoji === em ? 'bg-indigo-100 border-indigo-400 ring-1 ring-indigo-400' : 'bg-white border-slate-200'}`}>
+                          {em}
+                        </button>
+                      ))}
+                    </div>
+                    <input type="text" required placeholder="ชื่อ Pocket" value={newPocketName} onChange={(e) => setNewPocketName(e.target.value)} className="w-full p-2 text-xs border rounded outline-none focus:border-indigo-500" />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input type="number" placeholder="ยอดเริ่มต้น" value={newPocketBalance} onChange={(e) => setNewPocketBalance(e.target.value)} className="w-full p-2 text-xs border rounded outline-none focus:border-indigo-500" />
+                      <input type="number" placeholder="เป้าหมาย (ถ้ามี)" value={newPocketTarget} onChange={(e) => setNewPocketTarget(e.target.value)} className="w-full p-2 text-xs border rounded outline-none focus:border-indigo-500" />
+                    </div>
+                    <div className="flex justify-end gap-1 pt-1">
+                      <button type="button" onClick={() => setShowAddPocketForm(false)} className="px-2 py-1 text-[10px] text-slate-500 border rounded">ยกเลิก</button>
+                      <button type="submit" className="px-2 py-1 text-[10px] font-bold text-white bg-indigo-600 rounded">เพิ่ม</button>
+                    </div>
+                  </form>
+                )}
+
+                <div className="space-y-4">
+                  {Object.keys(ACCOUNTS).map(accKey => {
+                    const owned = pocketBalances.filter(p => p.account === accKey);
+                    return (
+                      <div key={accKey}>
+                        <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full border mb-2 ${ACCOUNTS[accKey].badgeClass}`}>{ACCOUNTS[accKey].name}</span>
+                        {owned.length === 0 ? (
+                          <p className="text-[11px] text-slate-400 pb-1">ยังไม่มี Pocket</p>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-2.5">
+                            {owned.map(p => {
+                              const hasGoal = Number(p.targetAmount) > 0;
+                              const progress = hasGoal ? Math.min(100, Math.round((p.currentBalance / p.targetAmount) * 100)) : 0;
+                              return (
+                                <div key={p.id} className="relative p-3 bg-slate-50/70 border border-slate-100 rounded-xl">
+                                  {pockets.length > 1 && (
+                                    <button onClick={(e) => handleDeletePocket(p.id, e)} className="absolute top-2 right-2 text-slate-300 hover:text-rose-600 text-[10px]">✕</button>
+                                  )}
+                                  <div className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-base mb-2">{p.emoji || '👛'}</div>
+                                  <p className="text-[11px] font-bold text-slate-700 truncate pr-3">{p.name}</p>
+                                  <p className={`text-sm font-extrabold mt-1 ${p.currentBalance >= 0 ? 'text-slate-800' : 'text-rose-600'}`}>
+                                    ฿{p.currentBalance.toLocaleString()}
+                                    {hasGoal && <span className="text-[10px] font-medium text-slate-400">/{Number(p.targetAmount).toLocaleString()}</span>}
+                                  </p>
+                                  {hasGoal && (
+                                    <div className="w-full h-1.5 bg-slate-200 rounded-full mt-2 overflow-hidden">
+                                      <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${progress}%` }} />
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Transaction Form */}
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+                <h3 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
+                  <span className="p-1.5 bg-indigo-100 text-indigo-700 rounded-lg"><Plus className="w-4 h-4" /></span>
+                  สร้างรายการใหม่
+                </h3>
+
+                <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl mb-4">
+                  <button onClick={() => setTxType('expense')} className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${txType === 'expense' ? 'bg-rose-500 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
+                    <TrendingDown className="w-3.5 h-3.5" /> จ่ายออก
+                  </button>
+                  <button onClick={() => setTxType('income')} className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${txType === 'income' ? 'bg-emerald-500 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
+                    <TrendingUp className="w-3.5 h-3.5" /> รับเข้า
+                  </button>
+                </div>
+
+                <form onSubmit={handleAddTransaction} className="space-y-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">ผู้ใช้เงิน / เจ้าของ *</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {Object.keys(ACCOUNTS).map(key => (
+                        <button key={key} type="button" onClick={() => setAccount(key)} className={`py-1.5 px-2 rounded-lg border text-xs font-bold transition flex flex-col items-center gap-1 ${account === key ? 'bg-indigo-50 border-indigo-400 text-indigo-900 ring-1 ring-indigo-400' : 'bg-slate-50 text-slate-500'}`}>
+                          {ACCOUNTS[key].name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Pocket *</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {pocketBalances.map(p => (
+                        <button key={p.id} type="button" onClick={() => setPocketId(p.id)} className={`py-1.5 px-2 rounded-lg border text-[11px] font-bold transition truncate flex items-center gap-1 ${pocketId === p.id ? 'bg-emerald-50 border-emerald-400 text-emerald-900 ring-1 ring-emerald-400' : 'bg-slate-50 text-slate-500'}`}>
+                          <span>{p.emoji || '👛'}</span> {p.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">จำนวนเงิน *</label>
+                    <input type="number" required min="0.01" step="any" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 focus:border-indigo-500 rounded-lg font-bold text-lg outline-none" />
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">หมวดหมู่</label>
+                      <button type="button" onClick={() => setShowAddCategoryForm(!showAddCategoryForm)} className="text-[10px] text-indigo-600 font-bold hover:underline">+ หมวดหมู่ใหม่</button>
+                    </div>
+
+                    {showAddCategoryForm && (
+                      <div className="mb-2 p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl space-y-2">
+                        <input type="text" required placeholder="ชื่อหมวดหมู่" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} className="w-full px-2 py-1 text-xs border rounded outline-none" />
+                        <div className="flex justify-end gap-1">
+                          <button type="button" onClick={() => setShowAddCategoryForm(false)} className="px-2 py-1 text-[10px] text-slate-500 border rounded bg-white">ยกเลิก</button>
+                          <button type="button" onClick={handleAddCustomCategory} className="px-2 py-1 text-[10px] font-bold text-white bg-indigo-600 rounded">บันทึก</button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-1.5 max-h-52 overflow-y-auto p-1 bg-slate-50 border border-slate-100 rounded-lg">
+                      {categories[txType]?.map(cat => (
+                        editingCatId === cat.id ? (
+                          <div key={cat.id} className="col-span-2 flex items-center gap-1 p-1.5 border border-indigo-400 rounded-md bg-white">
+                            <select value={editCatEmoji} onChange={(e) => setEditCatEmoji(e.target.value)} className="text-sm border rounded px-1 py-1 outline-none">
+                              {PRESET_EMOJIS.map(em => <option key={em} value={em}>{em}</option>)}
+                            </select>
+                            <input type="text" value={editCatName} onChange={(e) => setEditCatName(e.target.value)} className="flex-1 px-2 py-1 text-xs border rounded outline-none" />
+                            <button type="button" onClick={() => handleSaveEditCategory(cat.id, txType)} className="px-2 py-1 text-[10px] font-bold text-white bg-indigo-600 rounded">บันทึก</button>
+                            <button type="button" onClick={cancelEditCategory} className="px-2 py-1 text-[10px] text-slate-500 border rounded bg-white">ยกเลิก</button>
+                          </div>
+                        ) : (
+                          <div key={cat.id} className={`flex justify-between items-center p-1.5 border rounded-md cursor-pointer ${category === cat.name ? 'bg-white border-indigo-500 text-indigo-700' : 'bg-white text-slate-600'}`} onClick={() => setCategory(cat.name)}>
+                            <span className="text-xs font-semibold truncate flex items-center gap-1"><span className="text-sm">{cat.emoji}</span> {cat.name}</span>
+                            <span className="flex items-center gap-1 shrink-0">
+                              <button type="button" onClick={(e) => { e.stopPropagation(); startEditCategory(cat); }} className="text-[10px] text-slate-400 hover:text-indigo-600">✎</button>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteCategory(cat.id, txType); }} className="text-[10px] text-slate-400 hover:text-rose-600">✕</button>
+                            </span>
+                          </div>
+                        )
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">วันที่</label>
+                      <input type="date" required value={date} onChange={(e) => setDate(e.target.value)} className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none focus:border-indigo-500" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">บันทึกช่วยจำ</label>
+                      <input type="text" placeholder="ระบุเพิ่มเติม..." value={note} onChange={(e) => setNote(e.target.value)} className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none focus:border-indigo-500" />
+                    </div>
+                  </div>
+
+                  <button type="submit" className={`w-full py-2.5 rounded-lg font-bold text-white shadow-sm flex items-center justify-center gap-2 ${txType === 'expense' ? 'bg-rose-500' : 'bg-emerald-500'}`}>
+                    <Plus className="w-4 h-4" /> บันทึก{txType === 'expense' ? 'รายจ่าย' : 'รายรับ'}
+                  </button>
+                </form>
+              </div>
+            </section>
+
+            {/* คอลัมน์ขวา: รายการประวัติธุรกรรม */}
+            <section className="lg:col-span-7 space-y-6">
+              
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                <div className="p-4 border-b border-slate-100 bg-slate-50/50">
+                  <div className="flex flex-col sm:flex-row justify-between gap-3 mb-3">
+                    <h3 className="font-bold text-slate-800 flex items-center gap-2"><BookOpen className="w-4 h-4 text-indigo-600"/> ประวัติรายการ</h3>
+                  </div>
+                  
+                  {/* Filters */}
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                    <input type="text" placeholder="ค้นหา..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="col-span-1 px-2 py-1.5 bg-white border border-slate-200 rounded text-xs outline-none" />
+                    <select value={filterAccount} onChange={(e) => setFilterAccount(e.target.value)} className="px-2 py-1.5 bg-white border rounded text-xs outline-none">
+                      <option value="all">ทุกผู้ใช้</option>
+                      {Object.keys(ACCOUNTS).map(k => <option key={k} value={k}>{ACCOUNTS[k].name}</option>)}
+                    </select>
+                    <select value={filterPocket} onChange={(e) => setFilterPocket(e.target.value)} className="px-2 py-1.5 bg-white border rounded text-xs outline-none">
+                      <option value="all">ทุกกระเป๋า</option>
+                      {pockets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                    <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="px-2 py-1.5 bg-white border rounded text-xs outline-none">
+                      <option value="all">ทั้งหมด</option>
+                      <option value="income">รายรับ</option>
+                      <option value="expense">รายจ่าย</option>
+                    </select>
+                  </div>
+                </div>
+
+                {filteredTransactions.length === 0 ? (
+                  <div className="py-12 text-center text-sm text-slate-400">ไม่พบข้อมูลที่ตรงกับตัวกรอง</div>
+                ) : (
+                  <div className="divide-y divide-slate-100 max-h-[550px] overflow-y-auto">
+                    {filteredTransactions.map(tx => {
+                      const pocketName = pockets.find(p => p.id === tx.pocketId)?.name || 'ทั่วไป';
+                      return (
+                        <div key={tx.id} className="p-3.5 flex items-center justify-between hover:bg-slate-50 transition">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center text-lg">{tx.emoji}</div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-bold text-slate-800 truncate">{tx.category} {tx.note && <span className="text-[10px] font-normal text-slate-500 ml-1">({tx.note})</span>}</p>
+                              <div className="flex gap-1.5 mt-0.5">
+                                <span className="text-[9px] bg-slate-100 px-1 py-0.5 rounded text-slate-500">{tx.date}</span>
+                                <span className={`text-[9px] px-1 py-0.5 rounded border ${ACCOUNTS[tx.account]?.badgeClass}`}>{ACCOUNTS[tx.account]?.name}</span>
+                                <span className="text-[9px] bg-indigo-50 text-indigo-700 px-1 py-0.5 rounded">👛 {pocketName}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className={`font-extrabold text-sm ${tx.type === 'income' ? 'text-emerald-600' : 'text-slate-800'}`}>
+                              {tx.type === 'income' ? '+' : '-'}฿{tx.amount.toLocaleString()}
+                            </span>
+                            <button onClick={() => handleDeleteTransaction(tx.id)} className="text-slate-300 hover:text-rose-500 transition"><Trash2 className="w-3.5 h-3.5"/></button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+            </section>
+          </div>
+        )}
+      </main>
+
+      {/* Setup Google Sheets Modal */}
+      {showSetupModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl flex flex-col">
+            <div className="bg-gradient-to-r from-[#dfcaf3] to-[#f8d5cf] text-slate-700 p-4 flex justify-between items-center rounded-t-2xl">
+              <h3 className="font-bold flex items-center gap-2"><FileSpreadsheet className="w-5 h-5 text-emerald-400" /> ตั้งค่า Google Sheets Sync</h3>
+              <button onClick={() => setShowSetupModal(false)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+            <div className="p-5 text-sm text-slate-600 space-y-4">
+              <p>1. สร้าง Google Sheet เปล่า &gt; เลือกส่วนขยาย &gt; Apps Script</p>
+              <div className="bg-slate-100 p-2 rounded-lg flex justify-between items-center">
+                <span className="font-mono text-xs text-slate-800">โค้ดสำหรับบันทึกข้อมูล (Apps Script)</span>
+                <button onClick={handleCopyScript} className="text-xs bg-indigo-600 text-white px-2 py-1 rounded shadow-sm">{copiedScript ? 'คัดลอกแล้ว!' : 'คัดลอกโค้ด'}</button>
+              </div>
+              <p>2. นำโค้ดไปวางทับในหน้า Apps Script &gt; กด <b>การใช้งานจริง (Deploy)</b> &gt; สร้าง <b>Web App</b> &gt; ตั้งค่าสิทธิ์เป็น <b>ทุกคน (Anyone)</b></p>
+              <p>3. นำ <b>Web App URL</b> ที่ได้มาวางด้านล่าง:</p>
+              <input type="url" placeholder="https://script.google.com/macros/s/.../exec" value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} className="w-full p-2 border border-slate-300 rounded outline-none focus:border-indigo-500 font-mono text-xs" />
+              <p className="text-[11px] text-slate-400">หลังจากตั้งค่า URL แล้ว แอปจะดึงข้อมูลเก่าจาก Sheet มาให้อัตโนมัติ และจะบันทึกข้อมูลขึ้น Sheet ให้ทุกครั้งที่มีการเพิ่ม/แก้ไข/ลบรายการ (ไม่ต้องกด Sync เอง) ⚠️ หากเคยคัดลอกโค้ดไปวางไว้ก่อนหน้านี้ กรุณาคัดลอกโค้ดใหม่แล้วนำไปวางทับ + Deploy ใหม่อีกครั้ง เพื่อให้รองรับการดึงข้อมูลกลับ</p>
+            </div>
+            <div className="p-4 border-t bg-slate-50 rounded-b-2xl flex justify-end gap-2">
+              <button onClick={() => setShowSetupModal(false)} className="px-4 py-2 text-sm text-slate-600 border rounded hover:bg-slate-100">ยกเลิก</button>
+              <button onClick={() => { setShowSetupModal(false); if(sheetUrl) handleBackupToGoogleSheet(); }} className="px-4 py-2 text-sm bg-indigo-600 text-white font-bold rounded shadow hover:bg-indigo-700">บันทึก & ซิงก์</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
