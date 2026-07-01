@@ -1,0 +1,1997 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wallet - Little Bibi</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          indigo: {
+            50: '#fdf2f1', 100: '#fbe5e3', 200: '#f8d5cf', 300: '#f3c2cf',
+            400: '#dfcaf3', 500: '#c9a8ec', 600: '#ffc182', 700: '#f7a94e',
+            800: '#a8729a', 900: '#7a4f70'
+          }
+        }
+      }
+    }
+  }
+</script>
+<style>
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: translateY(0);} }
+.animate-fadeIn { animation: fadeIn .25s ease-out; }
+body { font-family: 'Segoe UI', 'Noto Sans Thai', sans-serif; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "lucide-react": "https://esm.sh/lucide-react@0.383.0?external=react"
+  }
+}
+</script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-type="module" data-presets="react">
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import ReactDOM from 'react-dom/client';
+import {
+  TrendingUp,
+  TrendingDown,
+  Wallet,
+  Plus,
+  Trash2,
+  Pencil,
+  CloudLightning,
+  Settings,
+  Calendar,
+  BookOpen,
+  Copy,
+  Check,
+  FileSpreadsheet,
+  Search,
+  RefreshCw,
+  AlertCircle,
+  User,
+  Users,
+  FolderPlus,
+  Palette,
+  Coins,
+  LayoutDashboard,
+  PiggyBank,
+  PieChart,
+  Activity,
+  ArrowRight,
+  Repeat,
+  Scissors,
+  Star,
+  Download,
+  Camera,
+  Zap,
+  ChevronLeft,
+  ChevronRight,
+  X,
+  BarChart2,
+  Award,
+  FileDown
+} from 'lucide-react';
+
+
+// ตัวสร้างไอดีสำรอง ปลอดภัยกว่า crypto.randomUUID ใน iframe sandbox
+const generateId = () => {
+  return 'tx_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now().toString(36);
+};
+
+// ตัวช่วยเข้าถึง LocalStorage อย่างปลอดภัย ป้องกันกรณี Sandbox บล็อก และดักจับ JSON Error
+const safeStorage = {
+  getItem: (key, defaultValue) => {
+    try {
+      const saved = window.localStorage.getItem(key);
+      if (!saved) return defaultValue;
+      return JSON.parse(saved);
+    } catch (e) {
+      console.warn("Storage access restricted or JSON parse error:", e);
+      return defaultValue; // ส่งคืนค่าเริ่มต้นแทนหากข้อมูลในเบราว์เซอร์เก่าพัง
+    }
+  },
+  setItem: (key, value) => {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+      console.warn("Storage write is restricted in this environment:", e);
+    }
+  }
+};
+
+// กำหนดบัญชีผู้รับผิดชอบค่าใช้จ่าย
+const ACCOUNTS = {
+  self: { id: 'self', name: 'Chompu', color: '#3B82F6', badgeClass: 'bg-blue-50 text-blue-700 border-blue-200' },
+  partner: { id: 'partner', name: 'Tawan', color: '#EC4899', badgeClass: 'bg-pink-50 text-pink-700 border-pink-200' },
+  joint: { id: 'joint', name: 'Common purse', color: '#F59E0B', badgeClass: 'bg-amber-50 text-amber-700 border-amber-200' }
+};
+
+const PRESET_EMOJIS = ['🍔', '☕', '🚗', '🛍️', '🧾', '🎮', '💊', '📦', '💰', '📈', '💻', '🎁', '✨', '🏠', '🎬', '✈️', '🐾', '💄', '📚', '🏋️'];
+const PRESET_COLORS = ['#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#8B5CF6', '#EC4899', '#6B7280', '#06B6D4', '#84CC16', '#F43F5E'];
+
+const DEFAULT_CATEGORIES = {
+  expense: [
+    { id: 'food', name: 'อาหารและเครื่องดื่ม', emoji: '🍔', color: '#EF4444' },
+    { id: 'travel', name: 'การเดินทาง / น้ำมัน', emoji: '🚗', color: '#F59E0B' },
+    { id: 'shopping', name: 'ช้อปปิ้ง', emoji: '🛍️', color: '#EC4899' },
+    { id: 'bills', name: 'บิล / ค่าเช่า / สาธารณูปโภค', emoji: '🧾', color: '#3B82F6' },
+    { id: 'entertainment', name: 'ความบันเทิง', emoji: '🎮', color: '#8B5CF6' },
+    { id: 'health', name: 'สุขภาพ / ยา', emoji: '💊', color: '#10B981' },
+    { id: 'other_exp', name: 'อื่นๆ', emoji: '📦', color: '#6B7280' }
+  ],
+  income: [
+    { id: 'salary', name: 'เงินเดือน / ค่าจ้าง', emoji: '💰', color: '#10B981' },
+    { id: 'invest', name: 'การลงทุน / ปันผล', emoji: '📈', color: '#059669' },
+    { id: 'freelance', name: 'งานเสริม / ฟรีแลนซ์', emoji: '💻', color: '#2563EB' },
+    { id: 'gift', name: 'ได้รับเสน่หา / ของขวัญ', emoji: '🎁', color: '#D97706' },
+    { id: 'other_inc', name: 'อื่นๆ', emoji: '✨', color: '#4B5563' }
+  ]
+};
+
+const DEFAULT_TRANSACTIONS = [
+  { id: '1', date: new Date().toISOString().split('T')[0], account: 'joint', pocketId: 'bank', type: 'income', category: 'เงินเดือน / ค่าจ้าง', emoji: '💰', amount: 35000, note: 'เงินเดือนกองกลาง' },
+  { id: '2', date: new Date().toISOString().split('T')[0], account: 'self', pocketId: 'cash', type: 'expense', category: 'อาหารและเครื่องดื่ม', emoji: '🍔', amount: 180, note: 'ข้าวกะเพราส่วนของเรา' },
+  { id: '3', date: new Date().toISOString().split('T')[0], account: 'joint', pocketId: 'bank', type: 'expense', category: 'บิล / ค่าเช่า / สาธารณูปโภค', emoji: '🧾', amount: 2500, note: 'ค่าน้ำค่าไฟห้องกองกลาง' },
+  { id: '4', date: new Date().toISOString().split('T')[0], account: 'partner', pocketId: 'saving', type: 'expense', category: 'ช้อปปิ้ง', emoji: '🛍️', amount: 1200, note: 'แฟนช้อปปิ้งเสื้อผ้าใหม่' }
+];
+
+const DEFAULT_POCKETS = [
+  { id: 'cash', name: 'ใช้จ่ายระหว่างเดือน', emoji: '💵', account: 'self', initialBalance: 2000, targetAmount: 0 },
+  { id: 'bank', name: 'ซื้อหูฟังอันใหม่', emoji: '🎧', account: 'joint', initialBalance: 15000, targetAmount: 15000 },
+  { id: 'saving', name: 'เก็บหอมรอมริบ', emoji: '🐷', account: 'partner', initialBalance: 30000, targetAmount: 0 }
+];
+
+function App() {
+  // ระบบแท็บ ('daily' = บันทึกรายวัน, 'dashboard' = แดชบอร์ดสรุปผล)
+  const [currentTab, setCurrentTab] = useState('daily');
+
+  // ข้อมูลหลัก
+  const [transactions, setTransactions] = useState(() => safeStorage.getItem('v5_transactions', DEFAULT_TRANSACTIONS));
+  const [categories, setCategories] = useState(() => safeStorage.getItem('v5_categories', DEFAULT_CATEGORIES));
+  const [pockets, setPockets] = useState(() => safeStorage.getItem('v5_pockets', DEFAULT_POCKETS));
+  // plans: { [pocketId]: { [YYYY-MM]: number } }
+  const [plans, setPlans] = useState(() => safeStorage.getItem('v5_plans', {}));
+  const [planViewMonth, setPlanViewMonth] = useState(() => new Date().toISOString().slice(0, 7));
+
+  // ── Recurring items ──
+  const [recurringItems, setRecurringItems] = useState(() => safeStorage.getItem('v5_recurring', []));
+  const [showRecurringModal, setShowRecurringModal] = useState(false);
+  const [newRecurName, setNewRecurName] = useState('');
+  const [newRecurAmt, setNewRecurAmt] = useState('');
+  const [newRecurAccount, setNewRecurAccount] = useState('joint');
+  const [newRecurPocket, setNewRecurPocket] = useState('');
+  const [newRecurCat, setNewRecurCat] = useState('');
+  const [newRecurType, setNewRecurType] = useState('expense');
+
+  // ── Quick Add templates ──
+  const [quickItems, setQuickItems] = useState(() => safeStorage.getItem('v5_quick', []));
+  const [showQuickModal, setShowQuickModal] = useState(false);
+  const [newQuickName, setNewQuickName] = useState('');
+  const [newQuickAmt, setNewQuickAmt] = useState('');
+  const [newQuickAccount, setNewQuickAccount] = useState('self');
+  const [newQuickPocket, setNewQuickPocket] = useState('');
+  const [newQuickCat, setNewQuickCat] = useState('');
+
+  // ── Monthly summary ──
+  const [showMonthlySummary, setShowMonthlySummary] = useState(false);
+  const [summaryMonth, setSummaryMonth] = useState(() => new Date().toISOString().slice(0,7));
+
+  // ── Split expense ──
+  const [splitMode, setSplitMode] = useState(false);
+  const [splitRatio, setSplitRatio] = useState(50); // % ของ self
+
+  // ── Receipt photo ──
+  const [receiptPhoto, setReceiptPhoto] = useState(null); // base64
+
+  // สเตตฟอร์มเพิ่มข้อมูล
+  const [txType, setTxType] = useState('expense');
+  const [account, setAccount] = useState('self');
+  const [pocketId, setPocketId] = useState(pockets[0]?.id || 'cash');
+  const [amount, setAmount] = useState('');
+  const [category, setCategory] = useState('');
+  const [note, setNote] = useState('');
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // สเตตฟอร์มจัดการ (Pocket & Categories)
+  const [showAddPocketForm, setShowAddPocketForm] = useState(false);
+  const [newPocketName, setNewPocketName] = useState('');
+  const [newPocketBalance, setNewPocketBalance] = useState('');
+  const [newPocketEmoji, setNewPocketEmoji] = useState(PRESET_EMOJIS[8]);
+  const [newPocketTarget, setNewPocketTarget] = useState('');
+  const [newPocketAccount, setNewPocketAccount] = useState('self');
+  
+  const [showAddCategoryForm, setShowAddCategoryForm] = useState(false);
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatEmoji, setNewCatEmoji] = useState(PRESET_EMOJIS[0]);
+  const [newCatColor, setNewCatColor] = useState(PRESET_COLORS[0]);
+  const [editingCatId, setEditingCatId] = useState(null);
+  const [editCatName, setEditCatName] = useState('');
+  const [editCatEmoji, setEditCatEmoji] = useState(PRESET_EMOJIS[0]);
+
+  // สเตตการค้นหา & คัดกรอง
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState('all'); 
+  const [filterAccount, setFilterAccount] = useState('all'); 
+  const [filterPocket, setFilterPocket] = useState('all');
+
+  // date filter สำหรับ Dashboard
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const [dashDateMode, setDashDateMode] = useState('all');
+  const [dashDateFrom, setDashDateFrom] = useState(todayStr);
+  const [dashDateTo, setDashDateTo] = useState(todayStr);
+
+  // สเตต Cloud Sync Google Sheets
+  const DEFAULT_SHEET_URL = 'https://script.google.com/macros/s/AKfycbyYe_EJTfgzqz9UxrCpGrXmGg_Et_DDOYe7zS69sBGxaEZXqlhREGqxGKK0ZpNofXOFxw/exec';
+  const [sheetUrl, setSheetUrl] = useState(() => {
+    try { return window.localStorage.getItem('v5_sheet_url') || DEFAULT_SHEET_URL; } catch(e) { return DEFAULT_SHEET_URL; }
+  });
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('not_connected'); 
+  const [lastSyncTime, setLastSyncTime] = useState(null);
+  const [showSetupModal, setShowSetupModal] = useState(false);
+  const [copiedScript, setCopiedScript] = useState(false);
+  
+  // แจ้งเตือน UI Toast
+  const [uiToast, setUiToast] = useState(null);
+
+  // Auto-Save Effect
+  useEffect(() => {
+    safeStorage.setItem('v5_transactions', transactions);
+    safeStorage.setItem('v5_categories', categories);
+    safeStorage.setItem('v5_pockets', pockets);
+    safeStorage.setItem('v5_plans', plans);
+    safeStorage.setItem('v5_recurring', recurringItems);
+    safeStorage.setItem('v5_quick', quickItems);
+    try { window.localStorage.setItem('v5_sheet_url', sheetUrl); } catch(e) {}
+  }, [transactions, categories, pockets, sheetUrl]);
+
+  // ดึงข้อมูลจาก Google Sheets อัตโนมัติตอนเปิดแอป (ถ้าตั้งค่า URL ไว้แล้ว)
+  const hasLoadedFromSheet = useRef(false);
+  useEffect(() => {
+    if (sheetUrl && !hasLoadedFromSheet.current) {
+      hasLoadedFromSheet.current = true;
+      handleLoadFromGoogleSheet(true);
+    }
+  }, [sheetUrl]);
+
+  // อัพเดตข้อมูลแบบเรียลไทม์: โพลดึงข้อมูลใหม่เป็นระยะ + ดึงทันทีเมื่อกลับมาที่แท็บ/หน้าต่าง
+  const isSyncingRef = useRef(false);
+  useEffect(() => { isSyncingRef.current = isSyncing; }, [isSyncing]);
+  // true ระหว่างที่ยังมีการแก้ไขค้างรอบันทึกขึ้น Sheet (กันโพลทับข้อมูลที่ยังไม่ได้เซฟ)
+  const hasPendingLocalChange = useRef(false);
+
+  useEffect(() => {
+    if (!sheetUrl) return;
+    const canPullNow = () => document.visibilityState === 'visible' && !isSyncingRef.current && !hasPendingLocalChange.current;
+
+    // โพลทุก 10 วินาทีขณะแท็บนี้เปิดอยู่ (เงียบๆ ไม่รบกวนผู้ใช้)
+    const pollInterval = setInterval(() => {
+      if (canPullNow()) handleLoadFromGoogleSheet(true);
+    }, 10000);
+
+    // ดึงข้อมูลใหม่ทันทีเมื่อสลับกลับมาที่แท็บนี้ (เช่น สลับแอปแล้วกลับมา)
+    const handleVisibilityChange = () => { if (canPullNow()) handleLoadFromGoogleSheet(true); };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // ดึงข้อมูลใหม่ทันทีเมื่อกลับมา focus หน้าต่าง (กรณีเปิดหลายอุปกรณ์/หน้าต่าง)
+    const handleFocus = () => { if (canPullNow()) handleLoadFromGoogleSheet(true); };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(pollInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [sheetUrl]);
+
+  // บันทึกขึ้น Google Sheets อัตโนมัติทุกครั้งที่มีการเพิ่ม/แก้ไข/ลบข้อมูล (debounce)
+  const autoSyncTimer = useRef(null);
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    if (!sheetUrl) return;
+    hasPendingLocalChange.current = true;
+    if (autoSyncTimer.current) clearTimeout(autoSyncTimer.current);
+    autoSyncTimer.current = setTimeout(() => {
+      handleBackupToGoogleSheet(true).finally(() => { hasPendingLocalChange.current = false; });
+    }, 1200);
+    return () => { if (autoSyncTimer.current) clearTimeout(autoSyncTimer.current); };
+  }, [transactions, categories, pockets, plans, recurringItems, quickItems]);
+
+  // เปลี่ยนหมวดหมู่อัตโนมัติเมื่อสลับประเภท (รายรับ/รายจ่าย)
+  useEffect(() => {
+    if (categories[txType] && categories[txType].length > 0) {
+      setCategory(categories[txType][0].name);
+    }
+  }, [txType, categories]);
+
+  // เลือก Pocket ของเจ้าของบัญชีนั้นๆ ให้อัตโนมัติเมื่อสลับผู้ใช้เงิน
+  useEffect(() => {
+    const ownedPockets = pockets.filter(p => p.account === account);
+    if (ownedPockets.length > 0 && !ownedPockets.some(p => p.id === pocketId)) {
+      setPocketId(ownedPockets[0].id);
+    } else if (ownedPockets.length === 0) {
+      setPocketId('');
+    }
+  }, [account, pockets]);
+
+  // Toast Function
+  const showToast = (message, type = 'info') => {
+    setUiToast({ message, type });
+    setTimeout(() => setUiToast(null), 3500);
+  };
+
+  // คำนวณยอดเงินของแต่ละกระเป๋า (Pocket Balances)
+  const pocketBalances = useMemo(() => {
+    return pockets.map(pocket => {
+      const txsForPocket = transactions.filter(tx => tx.pocketId === pocket.id);
+      const totalIncome = txsForPocket.filter(tx => tx.type === 'income').reduce((sum, tx) => sum + Number(tx.amount), 0);
+      const totalExpense = txsForPocket.filter(tx => tx.type === 'expense').reduce((sum, tx) => sum + Number(tx.amount), 0);
+      return {
+        ...pocket,
+        currentBalance: pocket.initialBalance + totalIncome - totalExpense
+      };
+    });
+  }, [pockets, transactions]);
+
+  // transactions ที่กรองตาม date range สำหรับ Dashboard
+  const dashFilteredTx = useMemo(() => {
+    if (dashDateMode === 'all') return transactions;
+    const now = new Date();
+    const todayD = new Date().toISOString().slice(0, 10);
+    let from, to;
+    if (dashDateMode === 'today') {
+      from = to = todayD;
+    } else if (dashDateMode === 'week') {
+      const d = new Date(now);
+      d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+      from = d.toISOString().slice(0, 10);
+      to = todayD;
+    } else if (dashDateMode === 'month') {
+      from = todayD.slice(0, 7) + '-01';
+      to = todayD;
+    } else {
+      from = dashDateFrom;
+      to = dashDateTo;
+    }
+    return transactions.filter(tx => tx.date >= from && tx.date <= to);
+  }, [transactions, dashDateMode, dashDateFrom, dashDateTo]);
+
+  // คำนวณยอดรวมรายรับรายจ่าย และยอดสุทธิ (Total Assets)
+  const summary = useMemo(() => {
+    let income = 0;
+    let expense = 0;
+    let selfExpense = 0;
+    let partnerExpense = 0;
+    let jointExpense = 0;
+
+    dashFilteredTx.forEach(tx => {
+      const amt = Number(tx.amount);
+      if (tx.type === 'income') {
+        income += amt;
+      } else {
+        expense += amt;
+        if (tx.account === 'self') selfExpense += amt;
+        if (tx.account === 'partner') partnerExpense += amt;
+        if (tx.account === 'joint') jointExpense += amt;
+      }
+    });
+
+    const totalAssets = pocketBalances.reduce((sum, p) => sum + p.currentBalance, 0);
+
+    return { income, expense, balance: totalAssets, selfExpense, partnerExpense, jointExpense };
+  }, [dashFilteredTx, pocketBalances]);
+
+  // สถิติหมวดหมู่สำหรับกราฟวงกลม (แยกตามผู้ใช้เงิน: เรา / แฟน / กองกลาง)
+  const categoryStatsByAccount = useMemo(() => {
+    const list = [...categories.expense, ...categories.income];
+
+    const buildStats = (accountFilter) => {
+      const stats = {};
+      let total = 0;
+      dashFilteredTx.forEach(tx => {
+        if (tx.type === 'expense' && tx.account === accountFilter && (filterPocket === 'all' || tx.pocketId === filterPocket)) {
+          stats[tx.category] = (stats[tx.category] || 0) + Number(tx.amount);
+          total += Number(tx.amount);
+        }
+      });
+      return Object.keys(stats).map(catName => {
+        const matchCat = list.find(c => c.name === catName) || { emoji: '📦', color: '#6B7280' };
+        return {
+          name: catName,
+          amount: stats[catName],
+          percentage: total > 0 ? Math.round((stats[catName] / total) * 100) : 0,
+          color: matchCat.color,
+          emoji: matchCat.emoji
+        };
+      }).sort((a, b) => b.amount - a.amount);
+    };
+
+    return {
+      self: buildStats('self'),
+      partner: buildStats('partner'),
+      joint: buildStats('joint')
+    };
+  }, [transactions, categories, filterPocket]);
+
+  // สัดส่วนทรัพย์สินในแต่ละกระเป๋า แยกตามเจ้าของ Pocket (เรา / แฟน / กองกลาง)
+  const assetStatsByAccount = useMemo(() => {
+    const buildPocketStats = (accountFilter) => {
+      const owned = pocketBalances.filter(p => p.account === accountFilter);
+      const totalAbs = owned.reduce((sum, p) => sum + Math.abs(p.currentBalance), 0);
+      return owned
+        .map(p => ({
+          id: p.id,
+          name: p.name,
+          emoji: p.emoji || '👛',
+          net: p.currentBalance,
+          percentage: totalAbs > 0 ? Math.round((Math.abs(p.currentBalance) / totalAbs) * 100) : 0
+        }))
+        .sort((a, b) => b.net - a.net);
+    };
+
+    return {
+      self: buildPocketStats('self'),
+      partner: buildPocketStats('partner'),
+      joint: buildPocketStats('joint')
+    };
+  }, [pocketBalances]);
+
+  const handleCopyScript = () => {
+    const scriptCode = `function doPost(e) {
+  try {
+    var data = JSON.parse(e.postData.contents);
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    var sheet = ss.getSheetByName('Transactions') || ss.insertSheet('Transactions');
+    sheet.clear();
+    sheet.appendRow(["ID", "วันที่", "เจ้าของเงิน / บัญชี", "กระเป๋าเงิน (Pocket)", "ประเภทเงิน", "หมวดหมู่", "จำนวนเงิน (บาท)", "รายละเอียดเพิ่มเติม"]);
+    data.transactions.forEach(function(tx) {
+      var accountText = tx.account === 'self' ? 'Chompu' : (tx.account === 'partner' ? 'Tawan' : 'Common purse');
+      sheet.appendRow([tx.id, tx.date, accountText, tx.pocketName || 'ทั่วไป', tx.type === 'income' ? 'รายรับ' : 'รายจ่าย', tx.category, tx.amount, tx.note || '']);
+    });
+    var headerRange = sheet.getRange("A1:H1");
+    headerRange.setFontWeight("bold");
+    headerRange.setBackgroundColor("#059669");
+    headerRange.setFontColor("#FFFFFF");
+
+    var dataSheet = ss.getSheetByName('AppData') || ss.insertSheet('AppData');
+    dataSheet.clear();
+    dataSheet.getRange(1, 1).setValue(JSON.stringify({
+      transactions: data.transactions || [],
+      categories: data.categories || null,
+      pockets: data.pockets || null
+    }));
+    dataSheet.hideSheet();
+
+    return ContentService.createTextOutput(JSON.stringify({ status: "success" })).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.toString() })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doGet(e) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var dataSheet = ss.getSheetByName('AppData');
+    if (!dataSheet) {
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", data: null })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var raw = dataSheet.getRange(1, 1).getValue();
+    var parsed = raw ? JSON.parse(raw) : null;
+    return ContentService.createTextOutput(JSON.stringify({ status: "success", data: parsed })).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.toString() })).setMimeType(ContentService.MimeType.JSON);
+  }
+}`;
+    const tempTextArea = document.createElement('textarea');
+    tempTextArea.value = scriptCode;
+    document.body.appendChild(tempTextArea);
+    tempTextArea.select();
+    try {
+      document.execCommand('copy');
+      setCopiedScript(true);
+      showToast('คัดลอก Apps Script เรียบร้อย!', 'success');
+      setTimeout(() => setCopiedScript(false), 2500);
+    } catch (err) {
+      console.error('Copy script failed', err);
+    }
+    document.body.removeChild(tempTextArea);
+  };
+
+  const handleBackupToGoogleSheet = async (silent = false) => {
+    if (!sheetUrl) {
+      if (!silent) setShowSetupModal(true);
+      return;
+    }
+    if (!silent) { setIsSyncing(true); setSyncStatus('syncing'); }
+
+    const mappedTransactions = transactions.map(tx => {
+      const pocketObj = pockets.find(p => p.id === tx.pocketId);
+      return { ...tx, pocketName: pocketObj ? pocketObj.name : 'ทั่วไป' };
+    });
+
+    try {
+      const response = await fetch(sheetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ transactions: mappedTransactions, categories, pockets })
+      });
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const responseData = await response.json();
+      if (responseData.status === 'success') {
+        setSyncStatus('success');
+        setLastSyncTime(new Date().toLocaleTimeString('th-TH'));
+        if (!silent) showToast('สำรองข้อมูลขึ้นคลาวด์สำเร็จ!', 'success');
+      } else {
+        throw new Error(responseData.message || 'Error from Google Sheets');
+      }
+    } catch (error) {
+      setSyncStatus('error');
+      if (!silent) showToast('การสำรองข้อมูลล้มเหลว กรุณาเช็ก URL', 'error');
+    } finally {
+      if (!silent) setIsSyncing(false);
+    }
+  };
+
+  const handleLoadFromGoogleSheet = async (silent = false) => {
+    if (!sheetUrl) return;
+    if (!silent) { setIsSyncing(true); setSyncStatus('syncing'); }
+    try {
+      const response = await fetch(sheetUrl, { method: 'GET' });
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const responseData = await response.json();
+      if (responseData.status === 'success' && responseData.data) {
+        // silent poll: หยุดถ้ายังมีข้อมูลค้างรอบันทึก (กันทับ) — manual sync กด bypass ได้เสมอ
+        if (!silent || !hasPendingLocalChange.current) {
+          if (Array.isArray(responseData.data.transactions)) setTransactions(responseData.data.transactions);
+          if (responseData.data.categories) setCategories(responseData.data.categories);
+          if (Array.isArray(responseData.data.pockets) && responseData.data.pockets.length > 0) setPockets(responseData.data.pockets);
+        }
+        setSyncStatus('success');
+        setLastSyncTime(new Date().toLocaleTimeString('th-TH'));
+        if (!silent) showToast('ดึงข้อมูลจาก Google Sheets สำเร็จ!', 'success');
+      } else if (!silent) {
+        showToast('ยังไม่มีข้อมูลใน Google Sheets', 'info');
+      }
+    } catch (error) {
+      setSyncStatus('error');
+      if (!silent) showToast('ดึงข้อมูลล้มเหลว กรุณาเช็ก URL', 'error');
+    } finally {
+      if (!silent) setIsSyncing(false);
+    }
+  };
+
+  const handleAddPocket = (e) => {
+    e.preventDefault();
+    if (!newPocketName.trim()) return;
+    const newPocket = { id: generateId(), name: newPocketName.trim(), emoji: newPocketEmoji, account: newPocketAccount, initialBalance: Number(newPocketBalance) || 0, targetAmount: Number(newPocketTarget) || 0 };
+    setPockets(prev => [...prev, newPocket]);
+    if (newPocket.account === account) setPocketId(newPocket.id);
+    setNewPocketName('');
+    setNewPocketBalance('');
+    setNewPocketTarget('');
+    setNewPocketEmoji(PRESET_EMOJIS[8]);
+    setShowAddPocketForm(false);
+    showToast(`เพิ่ม Pocket "${newPocket.name}" สำเร็จ!`, 'success');
+  };
+
+  const handleDeletePocket = (pId, e) => {
+    e.stopPropagation();
+    const remaining = pockets.filter(p => p.id !== pId);
+    setPockets(remaining);
+    if (pocketId === pId) setPocketId(remaining[0]?.id || '');
+    showToast('ลบ Pocket สำเร็จ', 'info');
+  };
+
+  const handleAddCustomCategory = (e) => {
+    e.preventDefault();
+    if (!newCatName.trim()) return;
+    if (categories[txType].some(cat => cat.name.toLowerCase() === newCatName.trim().toLowerCase())) {
+      showToast('หมวดหมู่นี้มีอยู่แล้ว', 'error');
+      return;
+    }
+    const newCat = { id: generateId(), name: newCatName.trim(), emoji: newCatEmoji, color: newCatColor };
+    setCategories(prev => ({ ...prev, [txType]: [...prev[txType], newCat] }));
+    setCategory(newCat.name);
+    setNewCatName('');
+    setShowAddCategoryForm(false);
+    showToast(`เพิ่มหมวดหมู่สำเร็จ!`, 'success');
+  };
+
+  const handleDeleteCategory = (catId, type) => {
+    setCategories(prev => ({ ...prev, [type]: prev[type].filter(cat => cat.id !== catId) }));
+    showToast('ลบหมวดหมู่สำเร็จ', 'info');
+  };
+
+  const startEditCategory = (cat) => {
+    setEditingCatId(cat.id);
+    setEditCatName(cat.name);
+    setEditCatEmoji(cat.emoji);
+    setShowAddCategoryForm(false);
+  };
+
+  const cancelEditCategory = () => {
+    setEditingCatId(null);
+    setEditCatName('');
+  };
+
+  const handleSaveEditCategory = (catId, type) => {
+    if (!editCatName.trim()) return;
+    setCategories(prev => ({
+      ...prev,
+      [type]: prev[type].map(cat => cat.id === catId ? { ...cat, name: editCatName.trim(), emoji: editCatEmoji } : cat)
+    }));
+    if (category === categories[type].find(c => c.id === catId)?.name) {
+      setCategory(editCatName.trim());
+    }
+    setEditingCatId(null);
+    showToast('แก้ไขหมวดหมู่สำเร็จ', 'success');
+  };
+
+  const handleAddTransaction = (e) => {
+    e.preventDefault();
+    if (!amount || Number(amount) <= 0) return;
+    const allCats = [...categories.expense, ...categories.income];
+    const matchedCategory = allCats.find(c => c.name === category);
+    const base = {
+      date, account, pocketId, type: txType, category,
+      emoji: matchedCategory ? matchedCategory.emoji : '📦',
+      receipt: receiptPhoto || null, note: note.trim()
+    };
+    if (txType === 'expense' && splitMode && splitRatio > 0 && splitRatio < 100) {
+      // แยก 2 รายการตามสัดส่วน
+      const amtSelf = Math.round(Number(amount) * splitRatio / 100);
+      const amtPartner = Number(amount) - amtSelf;
+      const selfPocket = pockets.find(p=>p.account==='self')?.id || pocketId;
+      const partnerPocket = pockets.find(p=>p.account==='partner')?.id || pocketId;
+      if (amtSelf > 0) setTransactions(prev=>[{ id:generateId(), ...base, account:'self', pocketId:selfPocket, amount:amtSelf, note:(note.trim()?note.trim()+' ':'')+`(หาร ${splitRatio}%)` },...prev]);
+      if (amtPartner > 0) setTransactions(prev=>[{ id:generateId(), ...base, account:'partner', pocketId:partnerPocket, amount:amtPartner, note:(note.trim()?note.trim()+' ':'')+`(หาร ${100-splitRatio}%)` },...prev]);
+      showToast(`หารค่าใช้จ่ายสำเร็จ! Chompu ฿${amtSelf.toLocaleString()} / Tawan ฿${amtPartner.toLocaleString()}`,'success');
+    } else {
+      setTransactions(prev => [{ id: generateId(), ...base, amount: Number(amount) }, ...prev]);
+      showToast('บันทึกรายการสำเร็จ!', 'success');
+    }
+    setAmount(''); setNote(''); setReceiptPhoto(null);
+  };
+
+  const [editingTx, setEditingTx] = useState(null);
+
+  // ── Export CSV ──
+  const handleExportCSV = () => {
+    const header = ['วันที่','ผู้ใช้เงิน','Pocket','ประเภท','หมวดหมู่','จำนวน','หมายเหตุ'];
+    const rows = transactions.map(tx => [
+      tx.date,
+      ACCOUNTS[tx.account]?.name || tx.account,
+      pockets.find(p=>p.id===tx.pocketId)?.name || tx.pocketId,
+      tx.type==='income'?'รายรับ':'รายจ่าย',
+      tx.category,
+      tx.amount,
+      tx.note||''
+    ]);
+    const csv = [header,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob = new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `wallet_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    showToast('ดาวน์โหลด CSV สำเร็จ','success');
+  };
+
+  // ── Add recurring to transactions ──
+  const applyRecurring = (item) => {
+    const newTx = {
+      id: generateId(),
+      date: new Date().toISOString().split('T')[0],
+      account: item.account, pocketId: item.pocketId,
+      type: item.type, category: item.category,
+      emoji: [...categories.expense,...categories.income].find(c=>c.name===item.category)?.emoji||'🔄',
+      amount: Number(item.amount), note: item.name
+    };
+    setTransactions(prev=>[newTx,...prev]);
+    showToast(`บันทึก "${item.name}" สำเร็จ`,'success');
+  };
+
+  // ── Quick add ──
+  const applyQuick = (item) => {
+    const newTx = {
+      id: generateId(),
+      date: new Date().toISOString().split('T')[0],
+      account: item.account, pocketId: item.pocketId,
+      type: 'expense', category: item.category,
+      emoji: [...categories.expense,...categories.income].find(c=>c.name===item.category)?.emoji||'⚡',
+      amount: Number(item.amount), note: item.name
+    };
+    setTransactions(prev=>[newTx,...prev]);
+    showToast(`Quick add "${item.name}" สำเร็จ`,'success');
+  };
+
+  // ── Handle photo upload ──
+  const handlePhotoUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => setReceiptPhoto(ev.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  // ── Monthly summary data ──
+  const monthlySummaryData = useMemo(() => {
+    const months = {};
+    transactions.forEach(tx => {
+      const m = tx.date.slice(0,7);
+      if (!months[m]) months[m] = { income:0, expense:0, count:0 };
+      if (tx.type==='income') months[m].income += Number(tx.amount);
+      else { months[m].expense += Number(tx.amount); months[m].count++; }
+    });
+    return Object.entries(months).sort((a,b)=>b[0].localeCompare(a[0]));
+  }, [transactions]);
+
+  // ── Top 5 รายการที่ใช้เยอะสุดของเดือน ──
+  const top5 = useMemo(() => {
+    const m = summaryMonth;
+    return [...transactions]
+      .filter(tx=>tx.type==='expense' && tx.date.slice(0,7)===m)
+      .sort((a,b)=>Number(b.amount)-Number(a.amount))
+      .slice(0,5);
+  }, [transactions, summaryMonth]);
+
+  // ── Streak: เดือนที่ออมได้ (expense < income) ──
+  const streak = useMemo(() => {
+    const sorted = monthlySummaryData.slice().reverse();
+    let count = 0;
+    for (let i = sorted.length-1; i >= 0; i--) {
+      const [,d] = sorted[i];
+      if (d.income > 0 && d.expense < d.income) count++;
+      else break;
+    }
+    return count;
+  }, [monthlySummaryData]);
+
+  // ── Trend 6 เดือนย้อนหลัง ──
+  const trend6 = useMemo(() => {
+    const result = [];
+    for (let i=5; i>=0; i--) {
+      const d = new Date(); d.setMonth(d.getMonth()-i);
+      const m = d.toISOString().slice(0,7);
+      const found = monthlySummaryData.find(([k])=>k===m);
+      result.push({ month: m.slice(5), income: found?.[1]?.income||0, expense: found?.[1]?.expense||0 });
+    }
+    return result;
+  }, [monthlySummaryData]);
+
+  const handleSaveEditTransaction = (updated) => {
+    setTransactions(prev => prev.map(tx => tx.id === updated.id ? updated : tx));
+    setEditingTx(null);
+    showToast('แก้ไขรายการสำเร็จ', 'success');
+  };
+
+  const handleDeleteTransaction = (id) => {
+    setTransactions(prev => prev.filter(tx => tx.id !== id));
+    showToast('ลบรายการสำเร็จ', 'info');
+  };
+
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter(tx => {
+      const matchesSearch = tx.note.toLowerCase().includes(searchTerm.toLowerCase()) || tx.category.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesType = filterType === 'all' || tx.type === filterType;
+      const matchesAccount = filterAccount === 'all' || tx.account === filterAccount;
+      const matchesPocket = filterPocket === 'all' || tx.pocketId === filterPocket;
+      return matchesSearch && matchesType && matchesAccount && matchesPocket;
+    });
+  }, [transactions, searchTerm, filterType, filterAccount, filterPocket]);
+
+  const renderDashboardTab = () => {
+    const savingsRate = summary.income > 0 ? ((summary.income - summary.expense) / summary.income) * 100 : 0;
+    const isHealthy = savingsRate >= 20;
+
+    const DATE_MODES = [
+      { key: 'all', label: 'ทั้งหมด' },
+      { key: 'today', label: 'วันนี้' },
+      { key: 'week', label: 'สัปดาห์นี้' },
+      { key: 'month', label: 'เดือนนี้' },
+      { key: 'custom', label: 'กำหนดเอง' },
+    ];
+
+    return (
+      <div className="space-y-6 animate-fadeIn">
+        {/* Date Filter */}
+        <div className="bg-white rounded-2xl px-4 py-3 shadow-sm border border-slate-100">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider shrink-0">ดูข้อมูล:</span>
+            <div className="flex flex-wrap gap-1.5">
+              {DATE_MODES.map(m => (
+                <button key={m.key} onClick={() => setDashDateMode(m.key)}
+                  className={`px-3 py-1 rounded-full text-xs font-bold transition border ${dashDateMode === m.key ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-indigo-300'}`}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            {dashDateMode === 'custom' && (
+              <div className="flex items-center gap-2 mt-1 w-full sm:w-auto sm:mt-0">
+                <input type="date" value={dashDateFrom} onChange={e => setDashDateFrom(e.target.value)}
+                  className="text-xs border border-slate-200 rounded-lg px-2 py-1 text-slate-600" />
+                <span className="text-xs text-slate-400">ถึง</span>
+                <input type="date" value={dashDateTo} onChange={e => setDashDateTo(e.target.value)}
+                  className="text-xs border border-slate-200 rounded-lg px-2 py-1 text-slate-600" />
+              </div>
+            )}
+            <span className="text-xs text-slate-400 ml-auto shrink-0">{dashFilteredTx.length} รายการ</span>
+          </div>
+        </div>
+
+        {/* กล่องสรุปสถานะการเงิน (Health) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="col-span-1 md:col-span-2 bg-gradient-to-br from-indigo-900 to-slate-800 text-white rounded-2xl p-6 shadow-md relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-4 opacity-10">
+              <Activity className="w-32 h-32" />
+            </div>
+            <div className="relative z-10">
+              <h3 className="text-sm font-semibold text-indigo-200 uppercase tracking-wider mb-1 flex items-center gap-2">
+                <PiggyBank className="w-4 h-4" /> อัตราการออมสุทธิ (Savings Rate)
+              </h3>
+              <div className="flex items-end gap-3 mt-2">
+                <span className="text-5xl font-extrabold tracking-tight">{savingsRate.toFixed(1)}%</span>
+                <span className="text-sm text-indigo-200 mb-1.5">ของรายได้</span>
+              </div>
+              <div className="mt-4 flex items-center gap-2">
+                <span className={`px-2.5 py-1 text-xs font-bold rounded-lg ${isHealthy ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'}`}>
+                  {isHealthy ? 'ยอดเยี่ยม! สุขภาพการเงินแข็งแรง' : 'ควรระวัง! ควรเพิ่มการออมให้ถึง 20%'}
+                </span>
+              </div>
+              
+              {/* แถบ Progress Bar ของรายรับเทียบรายจ่าย */}
+              <div className="mt-6 pt-4 border-t border-white/10 space-y-2">
+                <div className="flex justify-between text-xs font-medium text-indigo-200">
+                  <span>กระแสเงิน: ใช้ไปแล้ว {summary.expense.toLocaleString()} บ.</span>
+                  <span>รับรวม {summary.income.toLocaleString()} บ.</span>
+                </div>
+                <div className="w-full bg-slate-900/50 h-3 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full transition-all duration-1000 ${savingsRate > 50 ? 'bg-emerald-400' : savingsRate > 0 ? 'bg-amber-400' : 'bg-rose-500'}`}
+                    style={{ width: `${Math.min((summary.expense / (summary.income || 1)) * 100, 100)}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="col-span-1 bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex flex-col justify-center items-center text-center">
+            <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mb-4 shadow-inner">
+              <PieChart className="w-8 h-8" />
+            </div>
+            <h3 className="text-sm font-bold text-slate-500 mb-1">ความมั่งคั่งสุทธิของคุณ</h3>
+            <p className="text-3xl font-extrabold text-slate-800 tracking-tight">
+              ฿{summary.balance.toLocaleString('th-TH', { maximumFractionDigits: 0 })}
+            </p>
+            <p className="text-xs text-slate-400 mt-2">รวมจากทุกกระเป๋า {pockets.length} ใบ</p>
+          </div>
+        </div>
+
+        {/* แถวที่ 2: สัดส่วนกระเป๋าเงิน และ ผู้ใช้จ่าย */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          
+          {/* วิเคราะห์การเก็บเงินตามกระเป๋า แยกตามผู้ใช้เงิน */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+            <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <Coins className="w-4 h-4 text-emerald-600" /> แหล่งเก็บทรัพย์สิน แยกตามผู้ใช้
+            </h3>
+            <div className="grid grid-cols-1 gap-5">
+              {Object.keys(ACCOUNTS).map(accKey => {
+                const stats = assetStatsByAccount[accKey];
+                const accNet = stats.reduce((sum, p) => sum + p.net, 0);
+                return (
+                  <div key={accKey} className="space-y-2">
+                    <div className="flex items-center justify-between pb-1.5 border-b border-slate-100">
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${ACCOUNTS[accKey].badgeClass}`}>{ACCOUNTS[accKey].name}</span>
+                      <span className={`text-xs font-extrabold ${accNet >= 0 ? 'text-slate-700' : 'text-rose-600'}`}>฿{accNet.toLocaleString()}</span>
+                    </div>
+                    {stats.length === 0 ? (
+                      <p className="text-[11px] text-slate-400 text-center py-2">ยังไม่มีการเคลื่อนไหว</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {stats.map(p => (
+                          <div key={p.id} className="space-y-1">
+                            <div className="flex justify-between text-[11px] font-bold text-slate-600">
+                              <span className="flex items-center gap-1 truncate">{p.emoji} {p.name}</span>
+                              <span className={`shrink-0 ml-1 ${p.net >= 0 ? '' : 'text-rose-600'}`}>฿{p.net.toLocaleString()} ({p.percentage}%)</span>
+                            </div>
+                            <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                              <div className={`h-full rounded-full ${p.net >= 0 ? 'bg-emerald-500' : 'bg-rose-400'}`} style={{ width: `${p.percentage}%` }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* วิเคราะห์รายจ่ายของแต่ละคน */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+            <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <Users className="w-4 h-4 text-indigo-600" /> สัดส่วนผู้ใช้เงิน (Spender Profile)
+            </h3>
+            <div className="space-y-4">
+              {[
+                { name: 'ส่วนของ Chompu', amount: summary.selfExpense, color: 'bg-blue-500' },
+                { name: 'ส่วนของ Tawan', amount: summary.partnerExpense, color: 'bg-pink-500' },
+                { name: 'Common purse', amount: summary.jointExpense, color: 'bg-amber-500' }
+              ].sort((a,b) => b.amount - a.amount).map((spender, idx) => {
+                const percent = summary.expense > 0 ? (spender.amount / summary.expense) * 100 : 0;
+                return (
+                  <div key={idx} className="space-y-1.5">
+                    <div className="flex justify-between text-xs font-bold text-slate-600">
+                      <span>{spender.name}</span>
+                      <span>฿{spender.amount.toLocaleString()} ({percent.toFixed(1)}%)</span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${spender.color}`} style={{ width: `${percent}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* แถวที่ 3: หมวดหมู่ที่ใช้เงินไป แยกตามผู้ใช้เงิน */}
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+          <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
+            <PieChart className="w-4 h-4 text-rose-600" /> หมวดหมู่ที่ใช้เงินไป แยกตามผู้ใช้
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {Object.keys(ACCOUNTS).map(accKey => {
+              const stats = categoryStatsByAccount[accKey];
+              const accTotal = stats.reduce((sum, c) => sum + c.amount, 0);
+              return (
+                <div key={accKey} className="space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${ACCOUNTS[accKey].badgeClass}`}>{ACCOUNTS[accKey].name}</span>
+                    <span className="text-xs font-extrabold text-slate-700">฿{accTotal.toLocaleString()}</span>
+                  </div>
+                  {stats.length === 0 ? (
+                    <p className="text-[11px] text-slate-400 text-center py-4">ยังไม่มีรายจ่าย</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {stats.map((cat, idx) => (
+                        <div key={idx} className="space-y-1">
+                          <div className="flex justify-between items-center text-[11px] font-bold text-slate-600">
+                            <span className="flex items-center gap-1 truncate">
+                              <span className="text-sm">{cat.emoji}</span> {cat.name}
+                            </span>
+                            <span className="shrink-0 ml-1">฿{cat.amount.toLocaleString()} ({cat.percentage}%)</span>
+                          </div>
+                          <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full" style={{ width: `${cat.percentage}%`, backgroundColor: cat.color }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      {/* แถวที่ 4: Trend 6 เดือน + Streak */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Trend Chart */}
+          <div className="md:col-span-2 bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+            <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <BarChart2 className="w-4 h-4 text-indigo-600"/> แนวโน้ม 6 เดือนย้อนหลัง
+            </h3>
+            <div className="space-y-3">
+              {trend6.map((m,i)=>{
+                const maxVal = Math.max(...trend6.map(x=>Math.max(x.income,x.expense)),1);
+                return (
+                  <div key={i} className="space-y-1">
+                    <div className="flex justify-between text-[10px] font-bold text-slate-400">
+                      <span>{m.month}</span>
+                      <span className="text-emerald-600">รับ ฿{m.income.toLocaleString()}</span>
+                      <span className="text-rose-500">จ่าย ฿{m.expense.toLocaleString()}</span>
+                    </div>
+                    <div className="flex gap-1 h-3">
+                      <div className="bg-emerald-400 rounded-full transition-all" style={{width:`${(m.income/maxVal)*100}%`}}/>
+                      <div className="bg-rose-400 rounded-full transition-all" style={{width:`${(m.expense/maxVal)*100}%`}}/>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex gap-4 mt-3 text-[10px] font-bold text-slate-400">
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block"/>รายรับ</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-rose-400 inline-block"/>รายจ่าย</span>
+            </div>
+          </div>
+
+          {/* Streak + Top5 */}
+          <div className="space-y-4">
+            {/* Streak */}
+            <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 text-center">
+              <Award className="w-8 h-8 text-amber-500 mx-auto mb-2"/>
+              <p className="text-3xl font-extrabold text-amber-500">{streak}</p>
+              <p className="text-xs font-bold text-slate-500">เดือนติดต่อกันที่ออมได้</p>
+              <p className="text-[10px] text-slate-400 mt-1">{streak >= 3 ? '🔥 ยอดเยี่ยม! รักษาไว้นะ' : streak >= 1 ? '✨ ดีมาก! ต่อเนื่องไว้' : '💪 เริ่มออมวันนี้เลย'}</p>
+            </div>
+            {/* Top 5 */}
+            <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+              <h3 className="text-xs font-bold text-slate-700 mb-3 flex items-center gap-1.5"><TrendingDown className="w-3.5 h-3.5 text-rose-500"/> Top 5 รายจ่ายสูงสุด ({summaryMonth})</h3>
+              {top5.length === 0 ? <p className="text-[11px] text-slate-400 text-center py-2">ยังไม่มีรายจ่าย</p> : (
+                <div className="space-y-2">
+                  {top5.map((tx,i)=>(
+                    <div key={tx.id} className="flex items-center gap-2 text-[11px]">
+                      <span className="text-slate-400 font-bold w-3">{i+1}</span>
+                      <span className="flex-1 truncate text-slate-700">{tx.emoji} {tx.category}</span>
+                      <span className="font-extrabold text-rose-600 shrink-0">฿{Number(tx.amount).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+      </div>
+    );
+  };
+
+  // ---- แท็บ Plan vs Actual ----
+  const renderPlanTab = () => {
+    const months = [];
+    const txMonths = new Set(transactions.map(tx => tx.date.slice(0,7)));
+    txMonths.forEach(m => months.push(m));
+    const now = new Date().toISOString().slice(0,7);
+    if (!months.includes(now)) months.push(now);
+    months.sort().reverse();
+
+    const setPlan = (pocketId, month, val) => {
+      setPlans(prev => ({
+        ...prev,
+        [pocketId]: { ...(prev[pocketId] || {}), [month]: val === '' ? undefined : Number(val) }
+      }));
+    };
+
+    const getActual = (pocketId, month) => {
+      return transactions
+        .filter(tx => tx.pocketId === pocketId && tx.date.slice(0,7) === month && tx.type === 'expense')
+        .reduce((s, tx) => s + Number(tx.amount), 0);
+    };
+
+    const getPlan = (pocketId, month) => plans[pocketId]?.[month] ?? '';
+
+    // สรุปรายปี
+    const planYear = planViewMonth.slice(0,4);
+    const yearMonths = Array.from({length:12}, (_,i) => `${planYear}-${String(i+1).padStart(2,'0')}`);
+    const yearPlanTotal = pockets.reduce((s,p) => s + yearMonths.reduce((ms,m) => ms + (Number(plans[p.id]?.[m]) || 0), 0), 0);
+    const yearActualTotal = pockets.reduce((s,p) => s + yearMonths.reduce((ms,m) => ms + getActual(p.id, m), 0), 0);
+
+    const monthPlanTotal = pockets.reduce((s,p) => s + (Number(getPlan(p.id, planViewMonth)) || 0), 0);
+    const monthActualTotal = pockets.reduce((s,p) => s + getActual(p.id, planViewMonth), 0);
+
+    return (
+      <div className="space-y-6 animate-fadeIn">
+
+        {/* Header filter */}
+        <div className="bg-white rounded-2xl px-5 py-4 shadow-sm border border-slate-100 flex flex-wrap items-center gap-3">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">ดูเดือน:</span>
+          <input type="month" value={planViewMonth} onChange={e => setPlanViewMonth(e.target.value)}
+            className="border border-slate-200 rounded-xl px-3 py-1.5 text-sm text-slate-700 font-medium" />
+          <div className="ml-auto flex gap-4 text-sm">
+            <span className="font-bold text-slate-500">Plan รวม: <span className="text-indigo-600">฿{monthPlanTotal.toLocaleString()}</span></span>
+            <span className="font-bold text-slate-500">Actual รวม: <span className={monthActualTotal > monthPlanTotal && monthPlanTotal > 0 ? 'text-rose-600' : 'text-emerald-600'}>฿{monthActualTotal.toLocaleString()}</span></span>
+          </div>
+        </div>
+
+        {/* Plan by Account & Pocket */}
+        {Object.entries(ACCOUNTS).map(([accKey, accVal]) => {
+          const accPockets = pockets.filter(p => p.account === accKey);
+          if (accPockets.length === 0) return null;
+          const accPlan = accPockets.reduce((s,p) => s + (Number(getPlan(p.id, planViewMonth)) || 0), 0);
+          const accActual = accPockets.reduce((s,p) => s + getActual(p.id, planViewMonth), 0);
+          const accDiff = accActual - accPlan;
+
+          return (
+            <div key={accKey} className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+              {/* Account header */}
+              <div className="flex items-center justify-between px-5 py-3 bg-slate-50 border-b border-slate-100">
+                <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${accVal.badgeClass}`}>{accVal.name}</span>
+                <div className="flex gap-4 text-xs font-bold text-slate-500">
+                  <span>Plan: <span className="text-indigo-600">฿{accPlan.toLocaleString()}</span></span>
+                  <span>Actual: <span className={accDiff > 0 && accPlan > 0 ? 'text-rose-600' : 'text-emerald-600'}>฿{accActual.toLocaleString()}</span></span>
+                  {accPlan > 0 && <span className={accDiff > 0 ? 'text-rose-600' : 'text-emerald-600'}>{accDiff > 0 ? '▲' : '▼'} ฿{Math.abs(accDiff).toLocaleString()}</span>}
+                </div>
+              </div>
+
+              {/* Pocket rows */}
+              <div className="divide-y divide-slate-50">
+                {accPockets.map(p => {
+                  const plan = getPlan(p.id, planViewMonth);
+                  const actual = getActual(p.id, planViewMonth);
+                  const planNum = Number(plan) || 0;
+                  const diff = actual - planNum;
+                  const pct = planNum > 0 ? Math.min((actual / planNum) * 100, 100) : 0;
+                  const over = planNum > 0 && actual > planNum;
+
+                  return (
+                    <div key={p.id} className="px-5 py-4">
+                      <div className="flex items-center gap-3 mb-2.5">
+                        <span className="text-xl">{p.emoji || '👛'}</span>
+                        <span className="text-sm font-bold text-slate-700 flex-1">{p.name}</span>
+                        {/* input plan */}
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs text-slate-400">Plan ฿</span>
+                          <input
+                            type="number"
+                            placeholder="0"
+                            value={plan}
+                            onChange={e => setPlan(p.id, planViewMonth, e.target.value)}
+                            className="w-24 border border-slate-200 rounded-xl px-2 py-1 text-sm text-right font-bold text-indigo-700 focus:border-indigo-400 focus:outline-none"
+                          />
+                        </div>
+                        <div className="text-right w-24">
+                          <p className="text-xs text-slate-400">Actual</p>
+                          <p className={`text-sm font-extrabold ${over ? 'text-rose-600' : 'text-emerald-600'}`}>฿{actual.toLocaleString()}</p>
+                        </div>
+                        <div className="text-right w-16">
+                          {planNum > 0 ? (
+                            <>
+                              <p className="text-xs text-slate-400">ส่วนต่าง</p>
+                              <p className={`text-sm font-extrabold ${diff > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                                {diff > 0 ? '+' : ''}{diff.toLocaleString()}
+                              </p>
+                            </>
+                          ) : <p className="text-xs text-slate-400 text-center">—</p>}
+                        </div>
+                      </div>
+                      {/* progress bar */}
+                      {planNum > 0 && (
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-[10px] text-slate-400">
+                            <span>{pct.toFixed(0)}% ของแผน</span>
+                            {over && <span className="text-rose-500 font-bold">เกินแผน!</span>}
+                          </div>
+                          <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                            <div className={`h-full rounded-full transition-all duration-500 ${over ? 'bg-rose-400' : pct > 80 ? 'bg-amber-400' : 'bg-emerald-400'}`}
+                              style={{width: `${Math.min((actual/planNum)*100,100)}%`}} />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+
+        {/* สรุปรายปี */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="px-5 py-3 bg-indigo-50 border-b border-indigo-100 flex items-center justify-between">
+            <h3 className="text-sm font-bold text-indigo-800">📊 สรุปภาพรวมปี {planYear}</h3>
+            <div className="flex gap-4 text-xs font-bold">
+              <span className="text-indigo-600">Plan รวม: ฿{yearPlanTotal.toLocaleString()}</span>
+              <span className={yearActualTotal > yearPlanTotal && yearPlanTotal > 0 ? 'text-rose-600' : 'text-emerald-600'}>Actual รวม: ฿{yearActualTotal.toLocaleString()}</span>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-slate-100">
+                  <th className="text-left px-4 py-2.5 text-slate-500 font-bold w-32">Pocket</th>
+                  {yearMonths.map(m => (
+                    <th key={m} className={`px-2 py-2.5 text-center font-bold min-w-[64px] ${m === planViewMonth ? 'text-indigo-600 bg-indigo-50' : 'text-slate-400'}`}>
+                      {m.slice(5)}
+                    </th>
+                  ))}
+                  <th className="px-3 py-2.5 text-right text-slate-500 font-bold">รวม</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pockets.map(p => {
+                  const rowPlan = yearMonths.reduce((s,m) => s + (Number(plans[p.id]?.[m]) || 0), 0);
+                  const rowActual = yearMonths.reduce((s,m) => s + getActual(p.id, m), 0);
+                  return (
+                    <React.Fragment key={p.id}>
+                      <tr className="border-b border-slate-50 hover:bg-slate-50">
+                        <td className="px-4 py-2 font-bold text-slate-700 flex items-center gap-1.5">{p.emoji} {p.name}</td>
+                        {yearMonths.map(m => {
+                          const mp = Number(plans[p.id]?.[m]) || 0;
+                          const ma = getActual(p.id, m);
+                          return (
+                            <td key={m} className={`px-2 py-2 text-center ${m === planViewMonth ? 'bg-indigo-50' : ''}`}>
+                              <div className="text-indigo-500">{mp > 0 ? `฿${mp.toLocaleString()}` : <span className="text-slate-200">—</span>}</div>
+                              <div className={ma > 0 ? (mp > 0 && ma > mp ? 'text-rose-500 font-bold' : 'text-emerald-600') : 'text-slate-300'}>{ma > 0 ? `฿${ma.toLocaleString()}` : '—'}</div>
+                            </td>
+                          );
+                        })}
+                        <td className="px-3 py-2 text-right">
+                          <div className="text-indigo-600 font-bold">{rowPlan > 0 ? `฿${rowPlan.toLocaleString()}` : '—'}</div>
+                          <div className={`font-bold ${rowActual > rowPlan && rowPlan > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{rowActual > 0 ? `฿${rowActual.toLocaleString()}` : '—'}</div>
+                        </td>
+                      </tr>
+                    </React.Fragment>
+                  );
+                })}
+                {/* row รวม */}
+                <tr className="bg-slate-50 border-t border-slate-200 font-bold">
+                  <td className="px-4 py-2.5 text-slate-700">รวม</td>
+                  {yearMonths.map(m => {
+                    const mp = pockets.reduce((s,p) => s + (Number(plans[p.id]?.[m]) || 0), 0);
+                    const ma = pockets.reduce((s,p) => s + getActual(p.id, m), 0);
+                    return (
+                      <td key={m} className={`px-2 py-2.5 text-center ${m === planViewMonth ? 'bg-indigo-100' : ''}`}>
+                        <div className="text-indigo-600">{mp > 0 ? `฿${mp.toLocaleString()}` : '—'}</div>
+                        <div className={ma > mp && mp > 0 ? 'text-rose-600' : 'text-emerald-600'}>{ma > 0 ? `฿${ma.toLocaleString()}` : '—'}</div>
+                      </td>
+                    );
+                  })}
+                  <td className="px-3 py-2.5 text-right">
+                    <div className="text-indigo-600">฿{yearPlanTotal.toLocaleString()}</div>
+                    <div className={yearActualTotal > yearPlanTotal && yearPlanTotal > 0 ? 'text-rose-600' : 'text-emerald-600'}>฿{yearActualTotal.toLocaleString()}</div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p className="text-[10px] text-slate-400 px-4 pb-3 pt-1">แถวบน = Plan (สีน้ำเงิน) · แถวล่าง = Actual (สีเขียว/แดง)</p>
+          </div>
+        </div>
+
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-[#fdf2f1] text-slate-800 font-sans pb-16 antialiased">
+      
+      {/* Toast Notification */}
+      {uiToast && (
+        <div className="fixed top-20 right-4 z-50 animate-bounce">
+          <div className={`px-4 py-3 rounded-xl shadow-xl flex items-center gap-2 border text-sm font-semibold ${
+            uiToast.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'
+          }`}>
+            <span>{uiToast.type === 'success' ? '✅' : '❌'}</span>
+            <span>{uiToast.message}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
+      <header className="bg-gradient-to-r from-[#f8d5cf] via-[#dfcaf3] to-[#ffe59a] text-slate-700 shadow-xl sticky top-0 z-40">
+        <div className="max-w-6xl mx-auto px-4 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-white/60 rounded-xl shadow-inner">
+              <Wallet className="w-7 h-7 text-[#a8729a]" />
+            </div>
+            <div>
+              <h1 className="text-xl font-extrabold tracking-tight text-slate-700">Wallet <span className="text-[#a8729a]">‧⁺◟꒰🦌🎄꒱˚ ༘♡ Little bibi</span></h1>
+              <p className="text-[10px] text-slate-600 flex items-center gap-1">
+                <CloudLightning className="w-3 h-3" /> แยกผู้ใช้ • แยกกระเป๋า • Google Sheets Sync
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={handleExportCSV} className="p-2 bg-white/50 hover:bg-white/80 rounded-lg text-slate-600 transition" title="Export CSV">
+              <FileDown className="w-4 h-4" />
+            </button>
+            <button onClick={() => { setSummaryMonth(new Date().toISOString().slice(0,7)); setShowMonthlySummary(true); }} className="p-2 bg-white/50 hover:bg-white/80 rounded-lg text-slate-600 transition" title="สรุปรายเดือน">
+              <BarChart2 className="w-4 h-4" />
+            </button>
+            <button onClick={() => setShowSetupModal(true)} className="p-2 bg-white/50 hover:bg-white/80 rounded-lg text-slate-600 transition" title="ตั้งค่า Sheets">
+              <Settings className="w-4 h-4" />
+            </button>
+            <button onClick={() => handleLoadFromGoogleSheet()} disabled={isSyncing} className="flex items-center gap-1.5 px-3 py-2 bg-white/70 hover:bg-white text-slate-700 rounded-lg text-xs font-bold transition border border-slate-200" title="ดึงข้อมูลจาก Google Sheets">
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>ดึงข้อมูล</span>
+            </button>
+            <button onClick={() => handleBackupToGoogleSheet()} disabled={isSyncing} className="flex items-center gap-1.5 px-3 py-2 bg-[#ffc182] hover:bg-[#f7a94e] text-slate-800 rounded-lg text-xs font-bold transition">
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span>{isSyncing ? 'กำลังส่งข้อมูล...' : 'Sync Data'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* ระบบ Navigation Tabs */}
+        <div className="border-t border-white/40">
+          <div className="max-w-6xl mx-auto px-4 flex gap-6">
+            <button
+              onClick={() => setCurrentTab('daily')}
+              className={`py-3 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${
+                currentTab === 'daily' ? 'border-[#a8729a] text-[#a8729a]' : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              📝 บันทึกรายวัน
+            </button>
+            <button
+              onClick={() => setCurrentTab('dashboard')}
+              className={`py-3 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${
+                currentTab === 'dashboard' ? 'border-[#a8729a] text-[#a8729a]' : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <LayoutDashboard className="w-4 h-4" /> แดชบอร์ดภาพรวม
+            </button>
+            <button
+              onClick={() => setCurrentTab('plan')}
+              className={`py-3 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${
+                currentTab === 'plan' ? 'border-[#a8729a] text-[#a8729a]' : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              🎯 Plan vs Actual
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-4 py-6">
+        
+        {/* Render เนื้อหาตาม Tab ที่เลือก */}
+        {currentTab === 'dashboard' ? (
+          renderDashboardTab()
+        ) : currentTab === 'plan' ? (
+          renderPlanTab()
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-fadeIn">
+            {/* คอลัมน์ซ้าย: บันทึกรายการใหม่ */}
+            <section className="lg:col-span-5 space-y-6">
+              
+              {/* Pocket Summary */}
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                    <Coins className="w-4 h-4 text-emerald-600" /> Pocket ของฉัน
+                  </h3>
+                  <button onClick={() => setShowAddPocketForm(!showAddPocketForm)} className="text-[11px] font-bold text-indigo-600 flex items-center gap-1 hover:underline">
+                    <Plus className="w-3 h-3" /> เพิ่ม Pocket
+                  </button>
+                </div>
+
+                {showAddPocketForm && (
+                  <form onSubmit={handleAddPocket} className="mb-3 p-3 bg-slate-50 border border-slate-100 rounded-xl space-y-2">
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {Object.keys(ACCOUNTS).map(key => (
+                        <button key={key} type="button" onClick={() => setNewPocketAccount(key)} className={`py-1.5 rounded-lg border text-[11px] font-bold transition ${newPocketAccount === key ? 'bg-indigo-50 border-indigo-400 text-indigo-900 ring-1 ring-indigo-400' : 'bg-white text-slate-500'}`}>
+                          {ACCOUNTS[key].name}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {PRESET_EMOJIS.map(em => (
+                        <button key={em} type="button" onClick={() => setNewPocketEmoji(em)} className={`w-7 h-7 flex items-center justify-center rounded-lg border text-sm ${newPocketEmoji === em ? 'bg-indigo-100 border-indigo-400 ring-1 ring-indigo-400' : 'bg-white border-slate-200'}`}>
+                          {em}
+                        </button>
+                      ))}
+                    </div>
+                    <input type="text" required placeholder="ชื่อ Pocket" value={newPocketName} onChange={(e) => setNewPocketName(e.target.value)} className="w-full p-2 text-xs border rounded outline-none focus:border-indigo-500" />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input type="number" placeholder="ยอดเริ่มต้น" value={newPocketBalance} onChange={(e) => setNewPocketBalance(e.target.value)} className="w-full p-2 text-xs border rounded outline-none focus:border-indigo-500" />
+                      <input type="number" placeholder="เป้าหมาย (ถ้ามี)" value={newPocketTarget} onChange={(e) => setNewPocketTarget(e.target.value)} className="w-full p-2 text-xs border rounded outline-none focus:border-indigo-500" />
+                    </div>
+                    <div className="flex justify-end gap-1 pt-1">
+                      <button type="button" onClick={() => setShowAddPocketForm(false)} className="px-2 py-1 text-[10px] text-slate-500 border rounded">ยกเลิก</button>
+                      <button type="submit" className="px-2 py-1 text-[10px] font-bold text-white bg-indigo-600 rounded">เพิ่ม</button>
+                    </div>
+                  </form>
+                )}
+
+                <div className="space-y-4">
+                  {Object.keys(ACCOUNTS).map(accKey => {
+                    const owned = pocketBalances.filter(p => p.account === accKey);
+                    return (
+                      <div key={accKey}>
+                        <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full border mb-2 ${ACCOUNTS[accKey].badgeClass}`}>{ACCOUNTS[accKey].name}</span>
+                        {owned.length === 0 ? (
+                          <p className="text-[11px] text-slate-400 pb-1">ยังไม่มี Pocket</p>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-2.5">
+                            {owned.map(p => {
+                              const hasGoal = Number(p.targetAmount) > 0;
+                              const progress = hasGoal ? Math.min(100, Math.round((p.currentBalance / p.targetAmount) * 100)) : 0;
+                              return (
+                                <div key={p.id} className="relative p-3 bg-slate-50/70 border border-slate-100 rounded-xl">
+                                  {pockets.length > 1 && (
+                                    <button onClick={(e) => handleDeletePocket(p.id, e)} className="absolute top-2 right-2 text-slate-300 hover:text-rose-600 text-[10px]">✕</button>
+                                  )}
+                                  <div className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-base mb-2">{p.emoji || '👛'}</div>
+                                  <p className="text-[11px] font-bold text-slate-700 truncate pr-3">{p.name}</p>
+                                  <p className={`text-sm font-extrabold mt-1 ${p.currentBalance >= 0 ? 'text-slate-800' : 'text-rose-600'}`}>
+                                    ฿{p.currentBalance.toLocaleString()}
+                                    {hasGoal && <span className="text-[10px] font-medium text-slate-400">/{Number(p.targetAmount).toLocaleString()}</span>}
+                                  </p>
+                                  {hasGoal && (
+                                    <div className="w-full h-1.5 bg-slate-200 rounded-full mt-2 overflow-hidden">
+                                      <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${progress}%` }} />
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Quick Add + Recurring triggers (แสดงเมื่อยังไม่มีรายการ) */}
+              {quickItems.length === 0 && recurringItems.length === 0 && (
+                <div className="flex gap-2">
+                  <button onClick={()=>setShowQuickModal(true)} className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-white border border-dashed border-amber-300 rounded-xl text-xs font-bold text-amber-600 hover:bg-amber-50 transition">
+                    <Star className="w-3.5 h-3.5"/> + Quick Add
+                  </button>
+                  <button onClick={()=>setShowRecurringModal(true)} className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-white border border-dashed border-indigo-300 rounded-xl text-xs font-bold text-indigo-600 hover:bg-indigo-50 transition">
+                    <Repeat className="w-3.5 h-3.5"/> + รายการประจำ
+                  </button>
+                </div>
+              )}
+
+              {/* Quick Add Bar */}
+              {quickItems.length > 0 && (
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><Zap className="w-3.5 h-3.5 text-amber-500"/> Quick Add</h3>
+                    <button onClick={()=>setShowQuickModal(true)} className="text-[10px] text-indigo-500 hover:underline">จัดการ</button>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {quickItems.map(item=>(
+                      <button key={item.id} onClick={()=>applyQuick(item)} className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-full text-xs font-bold text-amber-800 hover:bg-amber-100 transition">
+                        <Zap className="w-3 h-3 text-amber-500"/> {item.name} <span className="text-amber-500">฿{Number(item.amount).toLocaleString()}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Recurring Bar */}
+              {recurringItems.length > 0 && (
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><Repeat className="w-3.5 h-3.5 text-indigo-500"/> รายการประจำ</h3>
+                    <button onClick={()=>setShowRecurringModal(true)} className="text-[10px] text-indigo-500 hover:underline">จัดการ</button>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {recurringItems.map(item=>(
+                      <button key={item.id} onClick={()=>applyRecurring(item)} className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 border border-indigo-200 rounded-full text-xs font-bold text-indigo-800 hover:bg-indigo-100 transition">
+                        <Repeat className="w-3 h-3 text-indigo-500"/> {item.name} <span className="text-indigo-500">฿{Number(item.amount).toLocaleString()}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Transaction Form */}
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+                <h3 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
+                  <span className="p-1.5 bg-indigo-100 text-indigo-700 rounded-lg"><Plus className="w-4 h-4" /></span>
+                  สร้างรายการใหม่
+                </h3>
+
+                <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl mb-4">
+                  <button onClick={() => setTxType('expense')} className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${txType === 'expense' ? 'bg-rose-500 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
+                    <TrendingDown className="w-3.5 h-3.5" /> จ่ายออก
+                  </button>
+                  <button onClick={() => setTxType('income')} className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${txType === 'income' ? 'bg-emerald-500 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
+                    <TrendingUp className="w-3.5 h-3.5" /> รับเข้า
+                  </button>
+                </div>
+
+                <form onSubmit={handleAddTransaction} className="space-y-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">ผู้ใช้เงิน / เจ้าของ *</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {Object.keys(ACCOUNTS).map(key => (
+                        <button key={key} type="button" onClick={() => setAccount(key)} className={`py-1.5 px-2 rounded-lg border text-xs font-bold transition flex flex-col items-center gap-1 ${account === key ? 'bg-indigo-50 border-indigo-400 text-indigo-900 ring-1 ring-indigo-400' : 'bg-slate-50 text-slate-500'}`}>
+                          {ACCOUNTS[key].name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Pocket *</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {pocketBalances.filter(p => p.account === account).map(p => (
+                        <button key={p.id} type="button" onClick={() => setPocketId(p.id)} className={`py-1.5 px-2 rounded-lg border text-[11px] font-bold transition flex flex-col items-start gap-0.5 ${pocketId === p.id ? 'bg-emerald-50 border-emerald-400 text-emerald-900 ring-1 ring-emerald-400' : 'bg-slate-50 text-slate-500'}`}>
+                          <span className="truncate flex items-center gap-1 w-full"><span>{p.emoji || '👛'}</span> {p.name}</span>
+                          <span className={`text-[10px] font-extrabold ${p.currentBalance < 0 ? 'text-rose-500' : 'text-slate-400'}`}>฿{p.currentBalance.toLocaleString()}</span>
+                        </button>
+                      ))}
+                      {pocketBalances.filter(p => p.account === account).length === 0 && (
+                        <p className="col-span-2 text-[11px] text-slate-400 py-2">ยังไม่มี Pocket ของผู้ใช้เงินนี้ กรุณาสร้าง Pocket ก่อน</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">จำนวนเงิน *</label>
+                    <input type="number" required min="0.01" step="any" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 focus:border-indigo-500 rounded-lg font-bold text-lg outline-none" />
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">หมวดหมู่</label>
+                      <button type="button" onClick={() => setShowAddCategoryForm(!showAddCategoryForm)} className="text-[10px] text-indigo-600 font-bold hover:underline">+ หมวดหมู่ใหม่</button>
+                    </div>
+
+                    {showAddCategoryForm && (
+                      <div className="mb-2 p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl space-y-2">
+                        <input type="text" required placeholder="ชื่อหมวดหมู่" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} className="w-full px-2 py-1 text-xs border rounded outline-none" />
+                        <div className="flex justify-end gap-1">
+                          <button type="button" onClick={() => setShowAddCategoryForm(false)} className="px-2 py-1 text-[10px] text-slate-500 border rounded bg-white">ยกเลิก</button>
+                          <button type="button" onClick={handleAddCustomCategory} className="px-2 py-1 text-[10px] font-bold text-white bg-indigo-600 rounded">บันทึก</button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-1.5 max-h-52 overflow-y-auto p-1 bg-slate-50 border border-slate-100 rounded-lg">
+                      {categories[txType]?.map(cat => (
+                        editingCatId === cat.id ? (
+                          <div key={cat.id} className="col-span-2 flex items-center gap-1 p-1.5 border border-indigo-400 rounded-md bg-white">
+                            <select value={editCatEmoji} onChange={(e) => setEditCatEmoji(e.target.value)} className="text-sm border rounded px-1 py-1 outline-none">
+                              {PRESET_EMOJIS.map(em => <option key={em} value={em}>{em}</option>)}
+                            </select>
+                            <input type="text" value={editCatName} onChange={(e) => setEditCatName(e.target.value)} className="flex-1 px-2 py-1 text-xs border rounded outline-none" />
+                            <button type="button" onClick={() => handleSaveEditCategory(cat.id, txType)} className="px-2 py-1 text-[10px] font-bold text-white bg-indigo-600 rounded">บันทึก</button>
+                            <button type="button" onClick={cancelEditCategory} className="px-2 py-1 text-[10px] text-slate-500 border rounded bg-white">ยกเลิก</button>
+                          </div>
+                        ) : (
+                          <div key={cat.id} className={`flex justify-between items-center p-1.5 border rounded-md cursor-pointer ${category === cat.name ? 'bg-white border-indigo-500 text-indigo-700' : 'bg-white text-slate-600'}`} onClick={() => setCategory(cat.name)}>
+                            <span className="text-xs font-semibold truncate flex items-center gap-1"><span className="text-sm">{cat.emoji}</span> {cat.name}</span>
+                            <span className="flex items-center gap-1 shrink-0">
+                              <button type="button" onClick={(e) => { e.stopPropagation(); startEditCategory(cat); }} className="text-[10px] text-slate-400 hover:text-indigo-600">✎</button>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteCategory(cat.id, txType); }} className="text-[10px] text-slate-400 hover:text-rose-600">✕</button>
+                            </span>
+                          </div>
+                        )
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">วันที่</label>
+                      <input type="date" required value={date} onChange={(e) => setDate(e.target.value)} className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none focus:border-indigo-500" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">บันทึกช่วยจำ</label>
+                      <input type="text" placeholder="ระบุเพิ่มเติม..." value={note} onChange={(e) => setNote(e.target.value)} className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none focus:border-indigo-500" />
+                    </div>
+                  </div>
+
+                  {/* แนบรูปใบเสร็จ */}
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1 flex items-center gap-1"><Camera className="w-3 h-3"/> แนบรูปใบเสร็จ (ไม่บังคับ)</label>
+                    <div className="flex items-center gap-2">
+                      <label className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-dashed border-slate-300 rounded-lg text-xs text-slate-500 hover:border-indigo-400 hover:text-indigo-600 transition">
+                        <Camera className="w-3.5 h-3.5"/> {receiptPhoto ? 'เปลี่ยนรูป' : 'เลือกรูป'}
+                        <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
+                      </label>
+                      {receiptPhoto && (
+                        <div className="flex items-center gap-2">
+                          <img src={receiptPhoto} alt="receipt" className="h-8 w-8 rounded object-cover border border-slate-200"/>
+                          <button type="button" onClick={()=>setReceiptPhoto(null)} className="text-xs text-rose-400 hover:text-rose-600">ลบ</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Split expense */}
+                  {txType === 'expense' && (
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1"><Scissors className="w-3 h-3"/> หารค่าใช้จ่าย</label>
+                        <button type="button" onClick={()=>setSplitMode(p=>!p)} className={`ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full border transition ${splitMode ? 'bg-indigo-100 border-indigo-300 text-indigo-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                          {splitMode ? 'เปิดอยู่' : 'ปิดอยู่'}
+                        </button>
+                      </div>
+                      {splitMode && (
+                        <div className="bg-slate-50 rounded-xl p-3 space-y-2">
+                          <div className="flex justify-between text-[11px] font-bold text-slate-600">
+                            <span>Chompu {splitRatio}%</span>
+                            <span>Tawan {100-splitRatio}%</span>
+                          </div>
+                          <input type="range" min={0} max={100} value={splitRatio} onChange={e=>setSplitRatio(Number(e.target.value))} className="w-full accent-indigo-600" />
+                          {amount > 0 && (
+                            <div className="flex justify-between text-[11px] text-slate-500">
+                              <span>฿{(Number(amount)*splitRatio/100).toLocaleString()}</span>
+                              <span>฿{(Number(amount)*(100-splitRatio)/100).toLocaleString()}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex gap-2">
+                    <button type="submit" className={`flex-1 py-2.5 rounded-lg font-bold text-white shadow-sm flex items-center justify-center gap-2 ${txType === 'expense' ? 'bg-rose-500' : 'bg-emerald-500'}`}>
+                      <Plus className="w-4 h-4" /> + บันทึก{txType === 'expense' ? 'รายจ่าย' : 'รายรับ'}
+                    </button>
+                    <button type="button" title="บันทึกเป็น Quick Add" onClick={()=>setShowQuickModal(true)} className="px-3 py-2.5 rounded-lg border border-slate-200 text-slate-400 hover:text-amber-500 hover:border-amber-300 transition">
+                      <Star className="w-4 h-4"/>
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </section>
+
+            {/* คอลัมน์ขวา: รายการประวัติธุรกรรม */}
+            <section className="lg:col-span-7 space-y-6">
+              
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                <div className="p-4 border-b border-slate-100 bg-slate-50/50">
+                  <div className="flex flex-col sm:flex-row justify-between gap-3 mb-3">
+                    <h3 className="font-bold text-slate-800 flex items-center gap-2"><BookOpen className="w-4 h-4 text-indigo-600"/> ประวัติรายการ</h3>
+                  </div>
+                  
+                  {/* Filters */}
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                    <input type="text" placeholder="ค้นหา..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="col-span-1 px-2 py-1.5 bg-white border border-slate-200 rounded text-xs outline-none" />
+                    <select value={filterAccount} onChange={(e) => setFilterAccount(e.target.value)} className="px-2 py-1.5 bg-white border rounded text-xs outline-none">
+                      <option value="all">ทุกผู้ใช้</option>
+                      {Object.keys(ACCOUNTS).map(k => <option key={k} value={k}>{ACCOUNTS[k].name}</option>)}
+                    </select>
+                    <select value={filterPocket} onChange={(e) => setFilterPocket(e.target.value)} className="px-2 py-1.5 bg-white border rounded text-xs outline-none">
+                      <option value="all">ทุกกระเป๋า</option>
+                      {pockets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                    <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="px-2 py-1.5 bg-white border rounded text-xs outline-none">
+                      <option value="all">ทั้งหมด</option>
+                      <option value="income">รายรับ</option>
+                      <option value="expense">รายจ่าย</option>
+                    </select>
+                  </div>
+                </div>
+
+                {filteredTransactions.length === 0 ? (
+                  <div className="py-12 text-center text-sm text-slate-400">ไม่พบข้อมูลที่ตรงกับตัวกรอง</div>
+                ) : (
+                  <div className="divide-y divide-slate-100 max-h-[550px] overflow-y-auto">
+                    {filteredTransactions.map(tx => {
+                      const pocketName = pockets.find(p => p.id === tx.pocketId)?.name || 'ทั่วไป';
+                      return (
+                        <div key={tx.id} className="p-3.5 flex items-center justify-between hover:bg-slate-50 transition">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center text-lg">{tx.emoji}</div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-bold text-slate-800 truncate">{tx.category} {tx.note && <span className="text-[10px] font-normal text-slate-500 ml-1">({tx.note})</span>}</p>
+                              <div className="flex gap-1.5 mt-0.5">
+                                <span className="text-[9px] bg-slate-100 px-1 py-0.5 rounded text-slate-500">{tx.date}</span>
+                                <span className={`text-[9px] px-1 py-0.5 rounded border ${ACCOUNTS[tx.account]?.badgeClass}`}>{ACCOUNTS[tx.account]?.name}</span>
+                                <span className="text-[9px] bg-indigo-50 text-indigo-700 px-1 py-0.5 rounded">👛 {pocketName}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className={`font-extrabold text-sm ${tx.type === 'income' ? 'text-emerald-600' : 'text-slate-800'}`}>
+                              {tx.type === 'income' ? '+' : '-'}฿{tx.amount.toLocaleString()}
+                            </span>
+                            <button onClick={() => setEditingTx({...tx})} className="text-slate-300 hover:text-indigo-500 transition"><Pencil className="w-3.5 h-3.5"/></button>
+                            <button onClick={() => handleDeleteTransaction(tx.id)} className="text-slate-300 hover:text-rose-500 transition"><Trash2 className="w-3.5 h-3.5"/></button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+            </section>
+          </div>
+        )}
+      </main>
+
+      {/* ── Monthly Summary Modal ── */}
+      {showMonthlySummary && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl my-4">
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2"><BarChart2 className="w-4 h-4 text-indigo-500"/> สรุปรายเดือน</h3>
+              <div className="flex items-center gap-2">
+                <input type="month" value={summaryMonth} onChange={e=>setSummaryMonth(e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1 text-sm text-slate-600"/>
+                <button onClick={()=>setShowMonthlySummary(false)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+              </div>
+            </div>
+            <div className="p-5 space-y-4">
+              {(() => {
+                const mData = monthlySummaryData.find(([k])=>k===summaryMonth)?.[1] || {income:0,expense:0,count:0};
+                const net = mData.income - mData.expense;
+                const sr = mData.income > 0 ? ((net/mData.income)*100).toFixed(1) : 0;
+                const prevM = (() => { const d=new Date(summaryMonth+'-01'); d.setMonth(d.getMonth()-1); return d.toISOString().slice(0,7); })();
+                const prevData = monthlySummaryData.find(([k])=>k===prevM)?.[1] || {income:0,expense:0};
+                return (
+                  <>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="text-center bg-emerald-50 rounded-xl p-3">
+                        <p className="text-[10px] font-bold text-emerald-600 uppercase">รายรับ</p>
+                        <p className="text-lg font-extrabold text-emerald-700">฿{mData.income.toLocaleString()}</p>
+                      </div>
+                      <div className="text-center bg-rose-50 rounded-xl p-3">
+                        <p className="text-[10px] font-bold text-rose-600 uppercase">รายจ่าย</p>
+                        <p className="text-lg font-extrabold text-rose-700">฿{mData.expense.toLocaleString()}</p>
+                      </div>
+                      <div className={`text-center rounded-xl p-3 ${net>=0?'bg-blue-50':'bg-amber-50'}`}>
+                        <p className={`text-[10px] font-bold uppercase ${net>=0?'text-blue-600':'text-amber-600'}`}>ออมได้</p>
+                        <p className={`text-lg font-extrabold ${net>=0?'text-blue-700':'text-amber-700'}`}>฿{net.toLocaleString()}</p>
+                      </div>
+                    </div>
+                    <div className="bg-slate-50 rounded-xl p-3 text-sm space-y-1">
+                      <div className="flex justify-between"><span className="text-slate-500">Savings Rate</span><span className="font-bold text-indigo-600">{sr}%</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">จำนวนรายการ</span><span className="font-bold">{mData.count} รายการ</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">เทียบเดือนก่อน (รายจ่าย)</span>
+                        <span className={`font-bold ${mData.expense > prevData.expense ? 'text-rose-600' : 'text-emerald-600'}`}>
+                          {prevData.expense > 0 ? (mData.expense > prevData.expense ? '▲' : '▼') + ' ฿' + Math.abs(mData.expense-prevData.expense).toLocaleString() : '—'}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-600 mb-2 flex items-center gap-1"><TrendingDown className="w-3.5 h-3.5 text-rose-500"/> Top 5 รายจ่ายสูงสุด</p>
+                      {top5.length===0 ? <p className="text-xs text-slate-400 text-center py-2">ยังไม่มีรายจ่าย</p> : (
+                        <div className="space-y-1.5">
+                          {top5.map((tx,i)=>(
+                            <div key={tx.id} className="flex items-center gap-2 text-sm">
+                              <span className="text-slate-400 font-bold w-4">{i+1}.</span>
+                              <span className="flex-1 text-slate-700 truncate">{tx.emoji} {tx.category} {tx.note&&<span className="text-slate-400 text-[10px]">({tx.note})</span>}</span>
+                              <span className="font-extrabold text-rose-600">฿{Number(tx.amount).toLocaleString()}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Quick Add Modal ── */}
+      {showQuickModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl">
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2"><Star className="w-4 h-4 text-amber-500"/> Quick Add Templates</h3>
+              <button onClick={()=>setShowQuickModal(false)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+            </div>
+            <div className="p-5 space-y-3">
+              <div className="space-y-2">
+                <p className="text-[10px] font-bold text-slate-400 uppercase">เพิ่มใหม่</p>
+                <input type="text" placeholder="ชื่อ เช่น กาแฟ" value={newQuickName} onChange={e=>setNewQuickName(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"/>
+                <input type="number" placeholder="จำนวน฿" value={newQuickAmt} onChange={e=>setNewQuickAmt(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"/>
+                <div className="grid grid-cols-3 gap-1">
+                  {Object.entries(ACCOUNTS).map(([k,v])=>(
+                    <button key={k} type="button" onClick={()=>setNewQuickAccount(k)} className={`py-1.5 rounded-lg text-xs font-bold border ${newQuickAccount===k?'bg-indigo-50 border-indigo-400 text-indigo-700':'bg-slate-50 border-slate-200 text-slate-400'}`}>{v.name}</button>
+                  ))}
+                </div>
+                <select value={newQuickPocket} onChange={e=>setNewQuickPocket(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700">
+                  <option value="">เลือก Pocket</option>
+                  {pockets.filter(p=>p.account===newQuickAccount).map(p=><option key={p.id} value={p.id}>{p.emoji} {p.name}</option>)}
+                </select>
+                <select value={newQuickCat} onChange={e=>setNewQuickCat(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700">
+                  <option value="">เลือกหมวดหมู่</option>
+                  {categories.expense.map(c=><option key={c.id} value={c.name}>{c.emoji} {c.name}</option>)}
+                </select>
+                <button onClick={()=>{
+                  if(!newQuickName||!newQuickAmt||!newQuickPocket||!newQuickCat) return showToast('กรอกข้อมูลให้ครบ','error');
+                  setQuickItems(prev=>[...prev,{id:generateId(),name:newQuickName,amount:newQuickAmt,account:newQuickAccount,pocketId:newQuickPocket,category:newQuickCat}]);
+                  setNewQuickName('');setNewQuickAmt('');setNewQuickPocket('');setNewQuickCat('');
+                  showToast('เพิ่ม Quick Add สำเร็จ','success');
+                }} className="w-full py-2 bg-amber-500 text-white font-bold rounded-xl text-sm">+ เพิ่ม</button>
+              </div>
+              {quickItems.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase">รายการที่มี</p>
+                  {quickItems.map(item=>(
+                    <div key={item.id} className="flex items-center gap-2 text-sm">
+                      <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0"/>
+                      <span className="flex-1 text-slate-700">{item.name} <span className="text-slate-400">฿{Number(item.amount).toLocaleString()}</span></span>
+                      <button onClick={()=>setQuickItems(prev=>prev.filter(x=>x.id!==item.id))} className="text-slate-300 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5"/></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Recurring Modal ── */}
+      {showRecurringModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl">
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2"><Repeat className="w-4 h-4 text-indigo-500"/> รายการประจำเดือน</h3>
+              <button onClick={()=>setShowRecurringModal(false)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+            </div>
+            <div className="p-5 space-y-3">
+              <div className="space-y-2">
+                <p className="text-[10px] font-bold text-slate-400 uppercase">เพิ่มรายการประจำ</p>
+                <input type="text" placeholder="ชื่อ เช่น ค่าเช่า" value={newRecurName} onChange={e=>setNewRecurName(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"/>
+                <input type="number" placeholder="จำนวน฿" value={newRecurAmt} onChange={e=>setNewRecurAmt(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"/>
+                <div className="grid grid-cols-2 gap-1">
+                  {['expense','income'].map(t=>(
+                    <button key={t} type="button" onClick={()=>setNewRecurType(t)} className={`py-1.5 rounded-lg text-xs font-bold border ${newRecurType===t?(t==='income'?'bg-emerald-50 border-emerald-400 text-emerald-700':'bg-rose-50 border-rose-400 text-rose-700'):'bg-slate-50 border-slate-200 text-slate-400'}`}>
+                      {t==='expense'?'รายจ่าย':'รายรับ'}
+                    </button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-3 gap-1">
+                  {Object.entries(ACCOUNTS).map(([k,v])=>(
+                    <button key={k} type="button" onClick={()=>setNewRecurAccount(k)} className={`py-1.5 rounded-lg text-xs font-bold border ${newRecurAccount===k?'bg-indigo-50 border-indigo-400 text-indigo-700':'bg-slate-50 border-slate-200 text-slate-400'}`}>{v.name}</button>
+                  ))}
+                </div>
+                <select value={newRecurPocket} onChange={e=>setNewRecurPocket(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700">
+                  <option value="">เลือก Pocket</option>
+                  {pockets.filter(p=>p.account===newRecurAccount).map(p=><option key={p.id} value={p.id}>{p.emoji} {p.name}</option>)}
+                </select>
+                <select value={newRecurCat} onChange={e=>setNewRecurCat(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700">
+                  <option value="">เลือกหมวดหมู่</option>
+                  {[...categories.expense,...categories.income].map(c=><option key={c.id} value={c.name}>{c.emoji} {c.name}</option>)}
+                </select>
+                <button onClick={()=>{
+                  if(!newRecurName||!newRecurAmt||!newRecurPocket||!newRecurCat) return showToast('กรอกข้อมูลให้ครบ','error');
+                  setRecurringItems(prev=>[...prev,{id:generateId(),name:newRecurName,amount:newRecurAmt,type:newRecurType,account:newRecurAccount,pocketId:newRecurPocket,category:newRecurCat}]);
+                  setNewRecurName('');setNewRecurAmt('');setNewRecurPocket('');setNewRecurCat('');
+                  showToast('เพิ่มรายการประจำสำเร็จ','success');
+                }} className="w-full py-2 bg-indigo-600 text-white font-bold rounded-xl text-sm">+ เพิ่ม</button>
+              </div>
+              {recurringItems.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase">รายการที่ตั้งไว้ (กดที่แถบหน้าหลักเพื่อบันทึก)</p>
+                  {recurringItems.map(item=>(
+                    <div key={item.id} className="flex items-center gap-2 text-sm">
+                      <Repeat className="w-3.5 h-3.5 text-indigo-400 shrink-0"/>
+                      <span className="flex-1 text-slate-700">{item.name} <span className="text-slate-400">฿{Number(item.amount).toLocaleString()}</span> <span className={`text-[10px] px-1 rounded ${item.type==='income'?'bg-emerald-50 text-emerald-600':'bg-rose-50 text-rose-600'}`}>{item.type==='income'?'รับ':'จ่าย'}</span></span>
+                      <button onClick={()=>setRecurringItems(prev=>prev.filter(x=>x.id!==item.id))} className="text-slate-300 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5"/></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Transaction Modal */}
+      {editingTx && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl">
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2"><Pencil className="w-4 h-4 text-indigo-500"/> แก้ไขรายการ</h3>
+              <button onClick={() => setEditingTx(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+            </div>
+            <div className="p-5 space-y-4">
+
+              {/* ประเภท */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">ประเภท</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {['expense','income'].map(t => (
+                    <button key={t} type="button" onClick={() => setEditingTx(p => ({...p, type: t}))}
+                      className={`py-2 rounded-xl text-sm font-bold border transition ${editingTx.type === t ? (t==='income' ? 'bg-emerald-50 border-emerald-400 text-emerald-700' : 'bg-rose-50 border-rose-400 text-rose-700') : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+                      {t === 'expense' ? '↙ จ่ายออก' : '↗ รับเข้า'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* ผู้ใช้เงิน */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">ผู้ใช้เงิน</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {Object.entries(ACCOUNTS).map(([k,v]) => (
+                    <button key={k} type="button" onClick={() => setEditingTx(p => ({...p, account: k}))}
+                      className={`py-1.5 rounded-xl text-xs font-bold border transition ${editingTx.account === k ? 'bg-indigo-50 border-indigo-400 text-indigo-700' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+                      {v.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Pocket */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">Pocket</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {pockets.filter(p => p.account === editingTx.account).map(p => (
+                    <button key={p.id} type="button" onClick={() => setEditingTx(prev => ({...prev, pocketId: p.id}))}
+                      className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition flex items-center gap-1 ${editingTx.pocketId === p.id ? 'bg-emerald-50 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+                      <span>{p.emoji || '👛'}</span>{p.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* หมวดหมู่ */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">หมวดหมู่</label>
+                <select value={editingTx.category} onChange={e => {
+                  const cat = [...(categories[editingTx.type] || [])].find(c => c.name === e.target.value);
+                  setEditingTx(p => ({...p, category: e.target.value, emoji: cat?.emoji || p.emoji}));
+                }} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700">
+                  {(categories[editingTx.type] || []).map(c => (
+                    <option key={c.id} value={c.name}>{c.emoji} {c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* จำนวนเงิน */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">จำนวนเงิน (บาท)</label>
+                <input type="number" value={editingTx.amount} onChange={e => setEditingTx(p => ({...p, amount: Number(e.target.value)}))}
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700" />
+              </div>
+
+              {/* วันที่ */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">วันที่</label>
+                <input type="date" value={editingTx.date} onChange={e => setEditingTx(p => ({...p, date: e.target.value}))}
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700" />
+              </div>
+
+              {/* โน้ต */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">บันทึกช่วยจำ</label>
+                <input type="text" value={editingTx.note || ''} onChange={e => setEditingTx(p => ({...p, note: e.target.value}))}
+                  placeholder="ระบุเพิ่มเติม..." className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700" />
+              </div>
+
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => setEditingTx(null)}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-bold text-slate-500 hover:bg-slate-50 transition">ยกเลิก</button>
+                <button onClick={() => handleSaveEditTransaction(editingTx)}
+                  className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 transition">บันทึกการแก้ไข</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Setup Google Sheets Modal */}
+      {showSetupModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl flex flex-col">
+            <div className="bg-gradient-to-r from-[#dfcaf3] to-[#f8d5cf] text-slate-700 p-4 flex justify-between items-center rounded-t-2xl">
+              <h3 className="font-bold flex items-center gap-2"><FileSpreadsheet className="w-5 h-5 text-emerald-400" /> ตั้งค่า Google Sheets Sync</h3>
+              <button onClick={() => setShowSetupModal(false)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+            <div className="p-5 text-sm text-slate-600 space-y-4">
+              <p>1. สร้าง Google Sheet เปล่า &gt; เลือกส่วนขยาย &gt; Apps Script</p>
+              <div className="bg-slate-100 p-2 rounded-lg flex justify-between items-center">
+                <span className="font-mono text-xs text-slate-800">โค้ดสำหรับบันทึกข้อมูล (Apps Script)</span>
+                <button onClick={handleCopyScript} className="text-xs bg-indigo-600 text-white px-2 py-1 rounded shadow-sm">{copiedScript ? 'คัดลอกแล้ว!' : 'คัดลอกโค้ด'}</button>
+              </div>
+              <p>2. นำโค้ดไปวางทับในหน้า Apps Script &gt; กด <b>การใช้งานจริง (Deploy)</b> &gt; สร้าง <b>Web App</b> &gt; ตั้งค่าสิทธิ์เป็น <b>ทุกคน (Anyone)</b></p>
+              <p>3. นำ <b>Web App URL</b> ที่ได้มาวางด้านล่าง:</p>
+              <input type="url" placeholder="https://script.google.com/macros/s/.../exec" value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} className="w-full p-2 border border-slate-300 rounded outline-none focus:border-indigo-500 font-mono text-xs" />
+              <p className="text-[11px] text-slate-400">หลังจากตั้งค่า URL แล้ว แอปจะดึงข้อมูลเก่าจาก Sheet มาให้อัตโนมัติ และจะบันทึกข้อมูลขึ้น Sheet ให้ทุกครั้งที่มีการเพิ่ม/แก้ไข/ลบรายการ (ไม่ต้องกด Sync เอง) ⚠️ หากเคยคัดลอกโค้ดไปวางไว้ก่อนหน้านี้ กรุณาคัดลอกโค้ดใหม่แล้วนำไปวางทับ + Deploy ใหม่อีกครั้ง เพื่อให้รองรับการดึงข้อมูลกลับ</p>
+            </div>
+            <div className="p-4 border-t bg-slate-50 rounded-b-2xl flex justify-end gap-2">
+              <button onClick={() => setShowSetupModal(false)} className="px-4 py-2 text-sm text-slate-600 border rounded hover:bg-slate-100">ยกเลิก</button>
+              <button onClick={() => { setShowSetupModal(false); if(sheetUrl) handleBackupToGoogleSheet(); }} className="px-4 py-2 text-sm bg-indigo-600 text-white font-bold rounded shadow hover:bg-indigo-700">บันทึก & ซิงก์</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
